@@ -71,16 +71,15 @@ st.markdown("""
 API_KEY = "90d75f0fd9f03982f65ae802c71aad75"
 fred = Fred(api_key=API_KEY)
 
-# 1. Técnico Binance (BTC, RSI Wilder, DAC EMA 200)
+# 1. Técnico BTC (Descarga global vía Yahoo Finance: sin bloqueos de IP en EE.UU.)
 try:
-    url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=300"
-    data = requests.get(url).json()
-    df = pd.DataFrame(data, columns=['t','o','h','l','c','v','_1','_2','_3','_4','_5','_6'])
-    closes = df['c'].astype(float)
-    highs = df['h'].astype(float)
+    btc_ticker = yf.Ticker("BTC-USD")
+    hist = btc_ticker.history(period="1y", interval="1d")
+    closes = hist['Close']
+    highs = hist['High']
     precio_btc = closes.iloc[-1]
     
-    # Banda DAC EMA 200
+    # Banda DAC EMA 200 (High - Close)
     ema_top = highs.ewm(span=200, adjust=False).mean().iloc[-1]
     ema_bot = closes.ewm(span=200, adjust=False).mean().iloc[-1]
     dist_ema = ((precio_btc - ema_bot) / ema_bot) * 100
@@ -125,7 +124,7 @@ try:
 except:
     dxy_val, dxy_bear, score_d = 100.0, False, 5
 
-# 5. Global Liquidity Index (GLI Central Banks con Offset de 91 días)
+# 5. Global Liquidity Index (GLI)
 try:
     walcl = fred.get_series('WALCL').dropna()
     ecb = fred.get_series('ECBASSETSW').dropna()
