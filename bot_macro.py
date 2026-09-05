@@ -10,76 +10,109 @@ st.set_page_config(page_title="BOT DAC MACRO", layout="wide", initial_sidebar_st
 # Auto-refresco cada 60 segundos
 st_autorefresh(interval=60 * 1000, key="data_refresh")
 
-# Inyección de estilos idénticos al panel de referencia
+# Estilos optimizados: tarjetas grandes y tipografía legible
 st.markdown("""
     <style>
-    .stApp { background-color: #0c0e14; color: #e1e7ec; }
-    .card-box {
-        background-color: #121620;
-        border-radius: 8px;
-        padding: 14px 18px;
-        border: 1px solid #1f2633;
-        margin-bottom: 12px;
+    .stApp { background-color: #0b0e14; color: #e1e7ec; }
+    
+    /* Contenedor principal con margen controlado */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
+        max-width: 96% !important;
     }
-    .card-title { color: #8b949e; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px; }
-    .card-score { font-size: 22px; font-weight: 800; color: #ffffff; }
-    .card-sub { color: #6e7681; font-size: 12px; margin-top: 6px; }
+
+    /* Tarjetas principales ampliadas */
+    .card-box {
+        background-color: #131722;
+        border-radius: 12px;
+        padding: 22px 24px;
+        border: 1px solid #232936;
+        margin-bottom: 16px;
+        min-height: 145px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    
+    .card-title { 
+        color: #8b949e; 
+        font-size: 14px; 
+        font-weight: 700; 
+        letter-spacing: 0.8px; 
+        text-transform: uppercase;
+    }
+    
+    .card-score { 
+        font-size: 32px; 
+        font-weight: 900; 
+        line-height: 1.2;
+        margin-top: 4px;
+    }
+    
+    .card-sub { 
+        color: #7d8590; 
+        font-size: 13px; 
+        font-weight: 500;
+        margin-top: 6px; 
+    }
     
     /* Barra degradada de confluencia */
     .slider-track {
         position: relative;
-        height: 14px;
-        border-radius: 7px;
+        height: 16px;
+        border-radius: 8px;
         background: linear-gradient(to right, #f85149 0%, #d29922 50%, #3fb950 100%);
-        margin-top: 15px;
-        margin-bottom: 8px;
+        margin-top: 22px;
+        margin-bottom: 10px;
     }
     .slider-pin {
         position: absolute;
-        top: -4px;
-        width: 6px;
-        height: 22px;
+        top: -5px;
+        width: 7px;
+        height: 26px;
         background-color: #ffffff;
-        border-radius: 3px;
-        box-shadow: 0 0 8px rgba(0,0,0,0.8);
+        border-radius: 4px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.9);
         transform: translateX(-50%);
     }
     .scale-labels {
         display: flex;
         justify-content: space-between;
-        font-size: 11px;
-        color: #6e7681;
+        font-size: 12px;
+        color: #8b949e;
+        font-weight: 600;
     }
     
     /* Mini-barras por componente */
     .comp-bar-bg {
         width: 100%;
-        height: 5px;
+        height: 7px;
         background-color: #21262d;
-        border-radius: 3px;
-        margin-top: 8px;
+        border-radius: 4px;
+        margin-top: 10px;
         overflow: hidden;
     }
     .comp-bar-fill {
         height: 100%;
-        border-radius: 3px;
+        border-radius: 4px;
     }
 
     /* Cinta de precios superior */
     .ticker-bar {
         display: flex;
         flex-wrap: wrap;
-        gap: 15px;
+        gap: 12px;
         justify-content: flex-end;
         align-items: center;
     }
     .ticker-item {
-        background-color: #121620;
-        border: 1px solid #1f2633;
-        padding: 5px 12px;
-        border-radius: 6px;
-        font-size: 13px;
-        font-weight: 600;
+        background-color: #131722;
+        border: 1px solid #232936;
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 700;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -88,7 +121,7 @@ st.markdown("""
 API_KEY = "90d75f0fd9f03982f65ae802c71aad75"
 fred = Fred(api_key=API_KEY)
 
-# 1. Técnico BTC e Históricos (Yahoo Finance)
+# 1. Técnico BTC (Yahoo Finance)
 try:
     btc_ticker = yf.Ticker("BTC-USD")
     hist = btc_ticker.history(period="1y", interval="1d")
@@ -96,7 +129,7 @@ try:
     highs = hist['High']
     precio_btc = closes.iloc[-1]
     
-    # Banda DAC EMA 200 (High - Close)
+    # Banda DAC EMA 200
     ema_top = highs.ewm(span=200, adjust=False).mean().iloc[-1]
     ema_bot = closes.ewm(span=200, adjust=False).mean().iloc[-1]
     dist_ema = ((precio_btc - ema_bot) / ema_bot) * 100
@@ -112,7 +145,7 @@ try:
 except:
     precio_btc, rsi, ema_bot, ema_top, dist_ema, score_r, score_e = 0, 50, 0, 0, 0, 5, 5
 
-# 2. Descarga de precios de Activos Clave (ETH, SOL, XRP, CVX)
+# 2. Descarga de Activos Clave
 try:
     tickers = yf.Tickers("ETH-USD SOL-USD XRP-USD CVX-USD")
     p_eth = tickers.tickers['ETH-USD'].history(period="1d")['Close'].iloc[-1]
@@ -162,7 +195,7 @@ try:
 except:
     total_gli, gli_sube, score_l = 30.5, False, 5
 
-# Puntuación final de confluencia (0-100)
+# Confluencia final (0-100)
 total_score = int((score_f * 0.20) + (score_r * 0.20) + (score_e * 0.15) + (score_l * 0.15) + (score_m * 0.15) + (score_d * 0.15)) * 10
 
 def color_by_score(val):
@@ -171,9 +204,9 @@ def color_by_score(val):
     return "#f85149"
 
 # --- CABECERA ---
-c_title, c_assets = st.columns([1, 2.5])
+c_title, c_assets = st.columns([1.1, 2.9])
 with c_title:
-    st.markdown("<h2 style='margin:0; padding:0; color:#f0f6fc;'>⚡ BOT DAC MACRO</h2>", unsafe_allow_html=True)
+    st.markdown("<h1 style='margin:0; padding:0; font-size:32px; font-weight:900; color:#f0f6fc;'>⚡ BOT DAC MACRO</h1>", unsafe_allow_html=True)
 
 with c_assets:
     st.markdown(f"""
@@ -186,10 +219,10 @@ with c_assets:
         </div>
     """, unsafe_allow_html=True)
 
-st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
+st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
 
-# --- PANEL CENTRAL ---
-col_gauge, col_cards = st.columns([1.1, 2.9])
+# --- CUERPO PRINCIPAL ---
+col_gauge, col_cards = st.columns([1.15, 2.85])
 
 with col_gauge:
     status_label = "Zona de Compra / Suelo Detectado" if total_score >= 70 else ("Precaución / Zona de Venta o Techo" if total_score <= 40 else "Neutral / Esperando Confluencia")
@@ -197,12 +230,12 @@ with col_gauge:
     pin_pct = min(max(total_score, 2), 98)
 
     st.markdown(f"""
-        <div class="card-box" style="padding-top: 25px; padding-bottom: 25px;">
-            <div class="card-title">ÍNDICE DAC CONFLUENCIA</div>
-            <div style="font-size: 68px; font-weight: 900; color: {status_color}; line-height: 1.1;">
-                {total_score} <span style="font-size: 22px; color: #6e7681; font-weight: 500;">/100</span>
+        <div class="card-box" style="padding-top: 30px; padding-bottom: 30px; min-height: 310px;">
+            <div class="card-title" style="font-size: 15px;">ÍNDICE DAC CONFLUENCIA</div>
+            <div style="font-size: 78px; font-weight: 900; color: {status_color}; line-height: 1.0; margin: 10px 0;">
+                {total_score} <span style="font-size: 26px; color: #6e7681; font-weight: 500;">/100</span>
             </div>
-            <div style="font-size: 15px; font-weight: 700; color: {status_color}; margin-top: 6px;">
+            <div style="font-size: 17px; font-weight: 700; color: {status_color};">
                 ● {status_label}
             </div>
             <div class="slider-track">
