@@ -64,6 +64,23 @@ st.markdown("""
         height: 100%;
         border-radius: 3px;
     }
+
+    /* Cinta de precios superior */
+    .ticker-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 15px;
+        justify-content: flex-end;
+        align-items: center;
+    }
+    .ticker-item {
+        background-color: #121620;
+        border: 1px solid #1f2633;
+        padding: 5px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -71,7 +88,7 @@ st.markdown("""
 API_KEY = "90d75f0fd9f03982f65ae802c71aad75"
 fred = Fred(api_key=API_KEY)
 
-# 1. Técnico BTC (Descarga global vía Yahoo Finance: sin bloqueos de IP en EE.UU.)
+# 1. Técnico BTC e Históricos (Yahoo Finance)
 try:
     btc_ticker = yf.Ticker("BTC-USD")
     hist = btc_ticker.history(period="1y", interval="1d")
@@ -95,7 +112,17 @@ try:
 except:
     precio_btc, rsi, ema_bot, ema_top, dist_ema, score_r, score_e = 0, 50, 0, 0, 0, 5, 5
 
-# 2. Sentimiento (Fear & Greed)
+# 2. Descarga de precios de Activos Clave (ETH, SOL, XRP, CVX)
+try:
+    tickers = yf.Tickers("ETH-USD SOL-USD XRP-USD CVX-USD")
+    p_eth = tickers.tickers['ETH-USD'].history(period="1d")['Close'].iloc[-1]
+    p_sol = tickers.tickers['SOL-USD'].history(period="1d")['Close'].iloc[-1]
+    p_xrp = tickers.tickers['XRP-USD'].history(period="1d")['Close'].iloc[-1]
+    p_cvx = tickers.tickers['CVX-USD'].history(period="1d")['Close'].iloc[-1]
+except:
+    p_eth, p_sol, p_xrp, p_cvx = 0, 0, 0, 0
+
+# 3. Sentimiento (Fear & Greed)
 try:
     fg_data = requests.get("https://api.alternative.me/fng/?limit=1").json()['data'][0]
     fg_val = int(fg_data['value'])
@@ -104,7 +131,7 @@ try:
 except:
     fg_val, fg_text, score_f = 50, "Neutral", 5
 
-# 3. Macro Fontanería (WRESBAL y Liquidez Neta)
+# 4. Macro Fontanería (WRESBAL)
 try:
     wresbal_series = fred.get_series('WRESBAL').dropna()
     res_actual = wresbal_series.iloc[-1]
@@ -114,7 +141,7 @@ try:
 except:
     res_actual, modo_qe, score_m = 0, False, 5
 
-# 4. Índice Dólar (DXY)
+# 5. Índice Dólar (DXY)
 try:
     dxy_df = yf.Ticker("DX-Y.NYB").history(period="1mo")
     dxy_val = dxy_df['Close'].iloc[-1]
@@ -124,7 +151,7 @@ try:
 except:
     dxy_val, dxy_bear, score_d = 100.0, False, 5
 
-# 5. Global Liquidity Index (GLI)
+# 6. Global Liquidity Index (GLI)
 try:
     walcl = fred.get_series('WALCL').dropna()
     ecb = fred.get_series('ECBASSETSW').dropna()
@@ -144,11 +171,20 @@ def color_by_score(val):
     return "#f85149"
 
 # --- CABECERA ---
-c_title, c_btc = st.columns([2, 1])
+c_title, c_assets = st.columns([1, 2.5])
 with c_title:
     st.markdown("<h2 style='margin:0; padding:0; color:#f0f6fc;'>⚡ BOT DAC MACRO</h2>", unsafe_allow_html=True)
-with c_btc:
-    st.markdown(f"<h3 style='margin:0; text-align:right; color:#e3b341;'>BTC: ${precio_btc:,.2f}</h3>", unsafe_allow_html=True)
+
+with c_assets:
+    st.markdown(f"""
+        <div class="ticker-bar">
+            <div class="ticker-item"><span style="color:#8b949e;">BTC:</span> <span style="color:#e3b341;">${precio_btc:,.2f}</span></div>
+            <div class="ticker-item"><span style="color:#8b949e;">ETH:</span> <span style="color:#58a6ff;">${p_eth:,.2f}</span></div>
+            <div class="ticker-item"><span style="color:#8b949e;">SOL:</span> <span style="color:#bc8cff;">${p_sol:,.2f}</span></div>
+            <div class="ticker-item"><span style="color:#8b949e;">XRP:</span> <span style="color:#3fb950;">${p_xrp:,.4f}</span></div>
+            <div class="ticker-item"><span style="color:#8b949e;">CVX:</span> <span style="color:#f0883e;">${p_cvx:,.2f}</span></div>
+        </div>
+    """, unsafe_allow_html=True)
 
 st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
 
