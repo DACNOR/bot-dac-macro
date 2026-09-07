@@ -13,6 +13,11 @@ st_autorefresh(interval=60 * 1000, key="data_refresh")
 # Estilos optimizados: tarjetas grandes y tipografía legible
 st.markdown("""
     <style>
+    /* Ocultar barra superior, icono de GitHub y menús */
+    header[data-testid="stHeader"] {
+        display: none !important;
+    }
+
     .stApp { background-color: #0b0e14; color: #e1e7ec; }
     
     /* Contenedor principal con margen controlado */
