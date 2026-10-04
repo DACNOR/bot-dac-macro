@@ -4,96 +4,81 @@ import pandas as pd
 import yfinance as yf
 from fredapi import Fred
 from streamlit_autorefresh import st_autorefresh
+import math
 
 st.set_page_config(page_title="BOT DAC MACRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Auto-refresco cada 60 segundos para mantener precios al minuto
+# Auto-refresco cada 60 segundos
 st_autorefresh(interval=60 * 1000, key="data_refresh")
 
-# Estilos optimizados: tarjetas grandes y tipografía legible
+# --- ESTILOS CSS INSTITUCIONALES (DARK MODE ESTILO TERMINAL DCAPITAL) ---
 st.markdown("""
     <style>
-    /* Ocultar barra superior, icono de GitHub y menús */
-    header[data-testid="stHeader"] {
-        display: none !important;
-    }
-
-    .stApp { background-color: #0b0e14; color: #e1e7ec; }
+    header[data-testid="stHeader"] { display: none !important; }
+    .stApp { background-color: #07090e; color: #e1e7ec; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     
-    /* Contenedor principal con margen controlado */
     .block-container {
-        padding-top: 2rem !important;
+        padding-top: 1.5rem !important;
         padding-bottom: 2rem !important;
         max-width: 96% !important;
     }
 
-    /* Tarjetas principales ampliadas */
+    /* Tarjetas y Contenedores */
     .card-box {
-        background-color: #131722;
-        border-radius: 12px;
-        padding: 22px 24px;
-        border: 1px solid #232936;
+        background-color: #0e121a;
+        border-radius: 14px;
+        padding: 20px 22px;
+        border: 1px solid #1a2232;
         margin-bottom: 16px;
-        min-height: 145px;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
     }
-    
+
     .card-title { 
-        color: #8b949e; 
-        font-size: 14px; 
+        color: #7d8590; 
+        font-size: 13px; 
         font-weight: 700; 
-        letter-spacing: 0.8px; 
+        letter-spacing: 1px; 
         text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        gap: 6px;
     }
     
     .card-score { 
-        font-size: 32px; 
+        font-size: 28px; 
         font-weight: 900; 
-        line-height: 1.2; 
         margin-top: 4px;
     }
     
     .card-sub { 
-        color: #7d8590; 
-        font-size: 13px; 
+        color: #8b949e; 
+        font-size: 12.5px; 
         font-weight: 500; 
-        margin-top: 6px; 
+        margin-top: 4px; 
     }
-    
-    /* Barra degradada de confluencia */
-    .slider-track {
-        position: relative;
-        height: 16px;
-        border-radius: 8px;
-        background: linear-gradient(to right, #f85149 0%, #d29922 50%, #3fb950 100%);
-        margin-top: 22px;
-        margin-bottom: 10px;
-    }
-    .slider-pin {
-        position: absolute;
-        top: -5px;
-        width: 7px;
-        height: 26px;
-        background-color: #ffffff;
-        border-radius: 4px;
-        box-shadow: 0 0 10px rgba(0,0,0,0.9);
-        transform: translateX(-50%);
-    }
-    .scale-labels {
+
+    /* Cinta de precios superior */
+    .ticker-bar {
         display: flex;
-        justify-content: space-between;
-        font-size: 12px;
-        color: #8b949e;
-        font-weight: 600;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: flex-end;
+        align-items: center;
     }
-    
-    /* Mini-barras por componente */
+    .ticker-item {
+        background-color: #0e121a;
+        border: 1px solid #1a2232;
+        padding: 7px 14px;
+        border-radius: 8px;
+        font-size: 13.5px;
+        font-weight: 700;
+    }
+
+    /* Mini barras de progreso */
     .comp-bar-bg {
         width: 100%;
-        height: 7px;
-        background-color: #21262d;
+        height: 6px;
+        background-color: #1a2232;
         border-radius: 4px;
         margin-top: 10px;
         overflow: hidden;
@@ -102,29 +87,12 @@ st.markdown("""
         height: 100%;
         border-radius: 4px;
     }
-
-    /* Cinta de precios superior */
-    .ticker-bar {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        justify-content: flex-end;
-        align-items: center;
-    }
-    .ticker-item {
-        background-color: #131722;
-        border: 1px solid #232936;
-        padding: 8px 14px;
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 700;
-    }
     </style>
 """, unsafe_allow_html=True)
 
 API_KEY = "90d75f0fd9f03982f65ae802c71aad75"
 
-# --- 1. PRECIOS RÁPIDOS EN TIEMPO REAL (Refresco cada 60s en 1 sola llamada) ---
+# --- FUNCIONES DE DESCARGA CON CACHÉ ---
 @st.cache_data(ttl=60, show_spinner=False)
 def get_live_prices():
     tickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "CVX-USD"]
@@ -142,7 +110,6 @@ def get_live_prices():
         pass
     return precios
 
-# --- 2. DATOS DIARIOS BTC (RSI y EMA 200 - Caché 15 min) ---
 @st.cache_data(ttl=900, show_spinner=False)
 def get_btc_history():
     try:
@@ -151,7 +118,6 @@ def get_btc_history():
     except:
         return pd.DataFrame()
 
-# --- 3. SENTIMIENTO (Fear & Greed - Caché 30 min) ---
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_fear_and_greed():
     try:
@@ -160,7 +126,6 @@ def get_fear_and_greed():
     except:
         return 50, "Neutral"
 
-# --- 4. MACRO FRED (WRESBAL y GLI - Caché 6 horas) ---
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_fred_data(api_key):
     try:
@@ -172,7 +137,6 @@ def get_fred_data(api_key):
     except:
         return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
 
-# --- 5. DÓLAR DXY (Caché 30 min) ---
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_dxy_data():
     try:
@@ -182,10 +146,9 @@ def get_dxy_data():
         return pd.DataFrame()
 
 # ==========================================
-# EJECUCIÓN Y CÁLCULOS
+# CÁLCULOS CUANTITATIVOS (TUS FÓRMULAS EXACTAS)
 # ==========================================
 
-# 1. Precios al minuto
 live_prices = get_live_prices()
 precio_btc = live_prices["BTC-USD"]
 p_eth = live_prices["ETH-USD"]
@@ -193,179 +156,213 @@ p_sol = live_prices["SOL-USD"]
 p_xrp = live_prices["XRP-USD"]
 p_cvx = live_prices["CVX-USD"]
 
-# 2. Análisis técnico de BTC
+# 1. Técnico BTC (RSI y EMA 200)
 hist = get_btc_history()
 if not hist.empty:
     closes = hist['Close']
     highs = hist['High']
     if precio_btc == 0.0:
-        precio_btc = closes.iloc[-1]
+        precio_btc = float(closes.iloc[-1])
     
-    # Banda DAC EMA 200
-    ema_top = highs.ewm(span=200, adjust=False).mean().iloc[-1]
-    ema_bot = closes.ewm(span=200, adjust=False).mean().iloc[-1]
+    ema_top = float(highs.ewm(span=200, adjust=False).mean().iloc[-1])
+    ema_bot = float(closes.ewm(span=200, adjust=False).mean().iloc[-1])
     dist_ema = ((precio_btc - ema_bot) / ema_bot) * 100
     
-    # RSI Wilder Oficial (14)
     diff = closes.diff()
     gain = diff.clip(lower=0).ewm(com=13, adjust=False).mean()
     loss = (-diff.clip(upper=0)).ewm(com=13, adjust=False).mean()
-    rsi = (100 - (100 / (1 + (gain / loss)))).iloc[-1]
+    rsi = float((100 - (100 / (1 + (gain / loss)))).iloc[-1])
     
     score_r = 10 if rsi <= 30 else (1 if rsi >= 75 else round((100 - rsi) / 10))
     score_e = 9 if precio_btc <= ema_top else (6 if precio_btc <= ema_top * 1.05 else 3)
 else:
-    rsi, ema_bot, ema_top, dist_ema, score_r, score_e = 50, 0, 0, 0, 5, 5
+    rsi, ema_bot, ema_top, dist_ema, score_r, score_e = 50.0, 0.0, 0.0, 0.0, 5, 5
 
-# 3. Sentimiento (Fear & Greed)
+# 2. Sentimiento Fear & Greed
 fg_val, fg_text = get_fear_and_greed()
 score_f = round((100 - fg_val) / 10)
 
-# 4 y 6. FRED (WRESBAL y GLI)
+# 3. Macro FRED (WRESBAL y GLI)
 wresbal_series, walcl, ecb = get_fred_data(API_KEY)
 
-# Macro Fontanería (WRESBAL)
 if not wresbal_series.empty:
-    res_actual = wresbal_series.iloc[-1]
-    res_sma = wresbal_series.rolling(14).mean().iloc[-1]
+    res_actual = float(wresbal_series.iloc[-1])
+    res_sma = float(wresbal_series.rolling(14).mean().iloc[-1])
     modo_qe = res_actual > res_sma
     score_m = 8 if modo_qe else 3
 else:
-    res_actual, modo_qe, score_m = 0, False, 5
+    res_actual, modo_qe, score_m = 0.0, False, 5
 
-# Global Liquidity Index (GLI)
 if not walcl.empty and not ecb.empty:
-    total_gli = (walcl.iloc[-1] + ecb.iloc[-1]) / 1e6
-    gli_prev = (walcl.iloc[-14] + ecb.iloc[-14]) / 1e6
+    total_gli = float(walcl.iloc[-1] + ecb.iloc[-1]) / 1e6
+    gli_prev = float(walcl.iloc[-14] + ecb.iloc[-14]) / 1e6
     gli_sube = total_gli > gli_prev
     score_l = 8 if gli_sube else 4
 else:
     total_gli, gli_sube, score_l = 30.5, False, 5
 
-# 5. Índice Dólar (DXY)
+# 4. DXY
 dxy_df = get_dxy_data()
 if not dxy_df.empty:
-    dxy_val = dxy_df['Close'].iloc[-1]
-    dxy_sma = dxy_df['Close'].rolling(20).mean().iloc[-1]
+    dxy_val = float(dxy_df['Close'].iloc[-1])
+    dxy_sma = float(dxy_df['Close'].rolling(20).mean().iloc[-1])
     dxy_bear = dxy_val < dxy_sma
     score_d = 8 if dxy_bear else 3
 else:
     dxy_val, dxy_bear, score_d = 100.0, False, 5
 
-# Confluencia final (0-100)
+# Score Total Confluencia
 total_score = int((score_f * 0.20) + (score_r * 0.20) + (score_e * 0.15) + (score_l * 0.15) + (score_m * 0.15) + (score_d * 0.15)) * 10
 
 def color_by_score(val):
-    if val >= 7: return "#3fb950"
-    if val >= 5: return "#d29922"
-    return "#f85149"
+    if val >= 7: return "#00F7A5"  # Verde brillante
+    if val >= 5: return "#FFB020"  # Ámbar/Amarillo
+    return "#FF4A68"              # Rojo alerta
 
-# --- CABECERA ---
+# ==========================================
+# GENERADOR VISUAL: TACÓMETRO ESTILO DCAPITAL
+# ==========================================
+def render_semi_gauge(score, label_bottom, size="medium"):
+    pct = max(0.0, min(100.0, float(score)))
+    # Cálculo de ángulo en semicírculo (de 180° a 0°)
+    angle_deg = 180 - (pct / 100.0 * 180)
+    angle_rad = math.radians(angle_deg)
+    
+    cx, cy, r = 100, 95, 75
+    pin_x = cx + r * math.cos(angle_rad)
+    pin_y = cy - r * math.sin(angle_rad)
+    
+    color = color_by_score(round(pct / 10))
+
+    return f"""
+    <div style="text-align: center; margin: 0 auto; width: 100%;">
+        <svg viewBox="0 0 200 125" style="width: 100%; max-width: 250px; display: block; margin: 0 auto; overflow: visible;">
+            <defs>
+                <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#FF4A68" />
+                    <stop offset="50%" stop-color="#FFB020" />
+                    <stop offset="100%" stop-color="#00F7A5" />
+                </linearGradient>
+            </defs>
+            <!-- Arco base oscuro -->
+            <path d="M 25 95 A 75 75 0 0 1 175 95" fill="none" stroke="#181e2b" stroke-width="14" stroke-linecap="round" />
+            <!-- Arco gradiente de color -->
+            <path d="M 25 95 A 75 75 0 0 1 175 95" fill="none" stroke="url(#gaugeGrad)" stroke-width="12" stroke-linecap="round" opacity="0.9" />
+            <!-- Punto indicador exterior -->
+            <circle cx="{pin_x}" cy="{pin_y}" r="8" fill="#ffffff" stroke="{color}" stroke-width="3" filter="drop-shadow(0 0 6px rgba(0,0,0,0.8))"/>
+            <circle cx="{pin_x}" cy="{pin_y}" r="3" fill="{color}" />
+            <!-- Valor central grande -->
+            <text x="100" y="88" text-anchor="middle" font-size="34" font-weight="900" fill="{color}">{int(pct)}</text>
+            <text x="100" y="108" text-anchor="middle" font-size="11" font-weight="700" fill="#8b949e" letter-spacing="1">{label_bottom.upper()}</text>
+        </svg>
+    </div>
+    """
+
+# ==========================================
+# RENDERIZADO DEL DASHBOARD
+# ==========================================
+
+# 1. Cabecera Ticker
 c_title, c_assets = st.columns([1.1, 2.9])
 with c_title:
-    st.markdown("<h1 style='margin:0; padding:0; font-size:32px; font-weight:900; color:#f0f6fc;'>⚡ BOT DAC MACRO</h1>", unsafe_allow_html=True)
+    st.markdown("<h2 style='margin:0; padding:0; font-size:26px; font-weight:900; color:#f0f6fc; letter-spacing:0.5px;'>⚡ BOT DAC MACRO</h2>", unsafe_allow_html=True)
 
 with c_assets:
     st.markdown(f"""
         <div class="ticker-bar">
-            <div class="ticker-item"><span style="color:#8b949e;">BTC:</span> <span style="color:#e3b341;">${precio_btc:,.2f}</span></div>
+            <div class="ticker-item"><span style="color:#8b949e;">BTC:</span> <span style="color:#f5d130;">${precio_btc:,.2f}</span></div>
             <div class="ticker-item"><span style="color:#8b949e;">ETH:</span> <span style="color:#58a6ff;">${p_eth:,.2f}</span></div>
-            <div class="ticker-item"><span style="color:#8b949e;">SOL:</span> <span style="color:#bc8cff;">${p_sol:,.2f}</span></div>
-            <div class="ticker-item"><span style="color:#8b949e;">XRP:</span> <span style="color:#3fb950;">${p_xrp:,.4f}</span></div>
-            <div class="ticker-item"><span style="color:#8b949e;">CVX:</span> <span style="color:#f0883e;">${p_cvx:,.2f}</span></div>
+            <div class="ticker-item"><span style="color:#8b949e;">SOL:</span> <span style="color:#c084fc;">${p_sol:,.2f}</span></div>
+            <div class="ticker-item"><span style="color:#8b949e;">XRP:</span> <span style="color:#00F7A5;">${p_xrp:,.4f}</span></div>
+            <div class="ticker-item"><span style="color:#8b949e;">CVX:</span> <span style="color:#fb923c;">${p_cvx:,.2f}</span></div>
         </div>
     """, unsafe_allow_html=True)
 
-st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
 
-# --- CUERPO PRINCIPAL ---
-col_gauge, col_cards = st.columns([1.15, 2.85])
+# 2. Panel Central: Índice DAC Confluencia
+col_main_gauge, col_top_gauges = st.columns([1.25, 2.75])
 
-with col_gauge:
-    status_label = "Zona de Compra / Suelo Detectado" if total_score >= 70 else ("Precaución / Zona de Venta o Techo" if total_score <= 40 else "Neutral / Esperando Confluencia")
-    status_color = color_by_score(round(total_score / 10))
-    pin_pct = min(max(total_score, 2), 98)
-
+with col_main_gauge:
+    status_label = "ZONA DE COMPRA / SUELO DETECTADO" if total_score >= 70 else ("PRECAUCIÓN / ZONA DE VENTA O TECHO" if total_score <= 40 else "NEUTRAL / ESPERANDO CONFLUENCIA")
+    status_col = color_by_score(round(total_score / 10))
+    
     st.markdown(f"""
-        <div class="card-box" style="padding-top: 30px; padding-bottom: 30px; min-height: 310px;">
-            <div class="card-title" style="font-size: 15px;">ÍNDICE DAC CONFLUENCIA</div>
-            <div style="font-size: 78px; font-weight: 900; color: {status_color}; line-height: 1.0; margin: 10px 0;">
-                {total_score} <span style="font-size: 26px; color: #6e7681; font-weight: 500;">/100</span>
-            </div>
-            <div style="font-size: 17px; font-weight: 700; color: {status_color};">
+        <div class="card-box" style="text-align: center; min-height: 295px;">
+            <div class="card-title" style="justify-content: center; margin-bottom: 8px;">● ÍNDICE DAC CONFLUENCIA MACRO</div>
+            {render_semi_gauge(total_score, status_label)}
+            <div style="margin-top: 10px; font-size: 13.5px; font-weight: 800; color: {status_col};">
                 ● {status_label}
             </div>
-            <div class="slider-track">
-                <div class="slider-pin" style="left: {pin_pct}%;"></div>
-            </div>
-            <div class="scale-labels">
-                <span>0<br>Techo</span>
-                <span>25</span>
-                <span>50<br>Neutral</span>
-                <span>75</span>
-                <span>100<br>Suelo</span>
-            </div>
         </div>
     """, unsafe_allow_html=True)
 
-with col_cards:
-    # Fila 1: F, R, E
-    r1c1, r1c2, r1c3 = st.columns(3)
-    with r1c1:
+with col_top_gauges:
+    # Tacómetros superiores: F, R, E
+    g1, g2, g3 = st.columns(3)
+    
+    with g1:
         st.markdown(f"""
-            <div class="card-box">
-                <div class="card-title">F - FEAR & GREED</div>
-                <div class="card-score" style="color:{color_by_score(score_f)};">{score_f}/10</div>
-                <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_f*10}%; background-color:{color_by_score(score_f)};"></div></div>
-                <div class="card-sub">FG actual: {fg_val} | {fg_text}</div>
+            <div class="card-box" style="text-align: center;">
+                <div class="card-title" style="justify-content: center;">● FEAR & GREED CRYPTO</div>
+                {render_semi_gauge(fg_val, fg_text)}
+                <div class="card-sub" style="margin-top: 8px;">Puntaje Contrario: <b style="color:{color_by_score(score_f)};">{score_f}/10</b></div>
             </div>
         """, unsafe_allow_html=True)
-    with r1c2:
+        
+    with g2:
+        rsi_label = "Sobreventa" if rsi < 30 else ("Sobrecompra" if rsi > 70 else "Neutral")
         st.markdown(f"""
-            <div class="card-box">
-                <div class="card-title">R - RSI DIARIO</div>
-                <div class="card-score" style="color:{color_by_score(score_r)};">{score_r}/10</div>
-                <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_r*10}%; background-color:{color_by_score(score_r)};"></div></div>
-                <div class="card-sub">RSI 14d: {rsi:.1f}</div>
+            <div class="card-box" style="text-align: center;">
+                <div class="card-title" style="justify-content: center;">● WILDER RSI BTC</div>
+                {render_semi_gauge(rsi, rsi_label)}
+                <div class="card-sub" style="margin-top: 8px;">Puntaje Técnico: <b style="color:{color_by_score(score_r)};">{score_r}/10</b></div>
             </div>
         """, unsafe_allow_html=True)
-    with r1c3:
+        
+    with g3:
+        # Puntuación EMA normalizada a base 100 para el arco
+        ema_pct = min(max((score_e / 10.0) * 100, 10), 100)
+        ema_status = "En Soporte" if score_e >= 9 else ("Rango +5%" if score_e >= 6 else "Extensión")
         st.markdown(f"""
-            <div class="card-box">
-                <div class="card-title">E - DAC EMA 200</div>
-                <div class="card-score" style="color:{color_by_score(score_e)};">{score_e}/10</div>
-                <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_e*10}%; background-color:{color_by_score(score_e)};"></div></div>
-                <div class="card-sub">${ema_bot:,.0f} - ${ema_top:,.0f} ({'+' if dist_ema>=0 else ''}{dist_ema:.1f}%)</div>
+            <div class="card-box" style="text-align: center;">
+                <div class="card-title" style="justify-content: center;">● DAC EMA 200 CANAL</div>
+                {render_semi_gauge(ema_pct, ema_status)}
+                <div class="card-sub" style="margin-top: 8px;">${ema_bot:,.0f} - ${ema_top:,.0f} ({'+' if dist_ema>=0 else ''}{dist_ema:.1f}%)</div>
             </div>
         """, unsafe_allow_html=True)
 
-    # Fila 2: L, D, M
-    r2c1, r2c2, r2c3 = st.columns(3)
-    with r2c1:
-        st.markdown(f"""
-            <div class="card-box">
-                <div class="card-title">L - LIQUIDEZ GLOBAL (GLI)</div>
-                <div class="card-score" style="color:{color_by_score(score_l)};">{score_l}/10</div>
-                <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_l*10}%; background-color:{color_by_score(score_l)};"></div></div>
-                <div class="card-sub">Bancos Centrales (Offset 91d): {'Expansión' if gli_sube else 'Contracción'}</div>
-            </div>
-        """, unsafe_allow_html=True)
-    with r2c2:
-        st.markdown(f"""
-            <div class="card-box">
-                <div class="card-title">D - DOLLAR DXY</div>
-                <div class="card-score" style="color:{color_by_score(score_d)};">{score_d}/10</div>
-                <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_d*10}%; background-color:{color_by_score(score_d)};"></div></div>
-                <div class="card-sub">DXY: {dxy_val:.2f} | {'Bajista (Lubricante)' if dxy_bear else 'Alcista (Drenaje)'}</div>
-            </div>
-        """, unsafe_allow_html=True)
-    with r2c3:
-        qe_txt = "🟢 MODO QE" if modo_qe else "🔴 MODO QT"
-        st.markdown(f"""
-            <div class="card-box">
-                <div class="card-title">M - RESERVAS WRESBAL</div>
-                <div class="card-score" style="color:{color_by_score(score_m)};">{score_m}/10</div>
-                <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{color_by_score(score_m)};"></div></div>
-                <div class="card-sub">{qe_txt} (${res_actual/1e6:.2f}T)</div>
-            </div>
-        """, unsafe_allow_html=True)
+# 3. Nivel Inferior: Fontanería de Liquidez y Macro (L, D, M)
+st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+m1, m2, m3 = st.columns(3)
+
+with m1:
+    st.markdown(f"""
+        <div class="card-box">
+            <div class="card-title">● L - LIQUIDEZ GLOBAL (GLI - OFFSET 91D)</div>
+            <div class="card-score" style="color:{color_by_score(score_l)};">{score_l}/10</div>
+            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_l*10}%; background-color:{color_by_score(score_l)};"></div></div>
+            <div class="card-sub">Bancos Centrales: <b>{'Expansión de Liquidez' if gli_sube else 'Contracción'}</b> (${total_gli:.2f}T)</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+with m2:
+    st.markdown(f"""
+        <div class="card-box">
+            <div class="card-title">● D - DOLLAR INDEX (DXY VS SMA 20)</div>
+            <div class="card-score" style="color:{color_by_score(score_d)};">{score_d}/10</div>
+            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_d*10}%; background-color:{color_by_score(score_d)};"></div></div>
+            <div class="card-sub">DXY: <b>{dxy_val:.2f}</b> | {'Bajista (Lubricante para Riesgo)' if dxy_bear else 'Alcista (Drenaje de Liquidez)'}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+with m3:
+    qe_label = "🟢 MODO QE (Inyección)" if modo_qe else "🔴 MODO QT (Absorción)"
+    st.markdown(f"""
+        <div class="card-box">
+            <div class="card-title">● M - RESERVAS BANCARIAS FED (WRESBAL)</div>
+            <div class="card-score" style="color:{color_by_score(score_m)};">{score_m}/10</div>
+            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{color_by_score(score_m)};"></div></div>
+            <div class="card-sub">Régimen Fed: <b>{qe_label}</b> (${res_actual/1e6:.2f}T)</div>
+        </div>
+    """, unsafe_allow_html=True)
