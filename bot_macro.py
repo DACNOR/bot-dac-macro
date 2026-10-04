@@ -7,7 +7,7 @@ from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="BOT DAC MACRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Auto-refresco cada 60 segundos
+# Auto-refresco cada 60 segundos para mantener precios al minuto
 st_autorefresh(interval=60 * 1000, key="data_refresh")
 
 # Estilos optimizados: tarjetas grandes y tipografía legible
@@ -122,30 +122,36 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- FUNCIONES DE DESCARGA CON CACHÉ INTELIGENTE ---
 API_KEY = "90d75f0fd9f03982f65ae802c71aad75"
 
+# --- 1. PRECIOS RÁPIDOS EN TIEMPO REAL (Refresco cada 60s en 1 sola llamada) ---
+@st.cache_data(ttl=60, show_spinner=False)
+def get_live_prices():
+    tickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "CVX-USD"]
+    precios = {"BTC-USD": 0.0, "ETH-USD": 0.0, "SOL-USD": 0.0, "XRP-USD": 0.0, "CVX-USD": 0.0}
+    try:
+        df = yf.download(tickers, period="1d", interval="1m", progress=False)
+        if not df.empty:
+            close_data = df['Close'] if 'Close' in df else df
+            for t in tickers:
+                if t in close_data.columns:
+                    s = close_data[t].dropna()
+                    if len(s) > 0:
+                        precios[t] = float(s.iloc[-1])
+    except:
+        pass
+    return precios
+
+# --- 2. DATOS DIARIOS BTC (RSI y EMA 200 - Caché 15 min) ---
 @st.cache_data(ttl=900, show_spinner=False)
-def get_btc_data():
+def get_btc_history():
     try:
         btc_ticker = yf.Ticker("BTC-USD")
-        hist = btc_ticker.history(period="1y", interval="1d")
-        return hist
+        return btc_ticker.history(period="1y", interval="1d")
     except:
         return pd.DataFrame()
 
-@st.cache_data(ttl=60, show_spinner=False)
-def get_alt_tickers():
-    try:
-        tickers = yf.Tickers("ETH-USD SOL-USD XRP-USD CVX-USD")
-        p_eth = tickers.tickers['ETH-USD'].history(period="1d")['Close'].iloc[-1]
-        p_sol = tickers.tickers['SOL-USD'].history(period="1d")['Close'].iloc[-1]
-        p_xrp = tickers.tickers['XRP-USD'].history(period="1d")['Close'].iloc[-1]
-        p_cvx = tickers.tickers['CVX-USD'].history(period="1d")['Close'].iloc[-1]
-        return float(p_eth), float(p_sol), float(p_xrp), float(p_cvx)
-    except:
-        return 0.0, 0.0, 0.0, 0.0
-
+# --- 3. SENTIMIENTO (Fear & Greed - Caché 30 min) ---
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_fear_and_greed():
     try:
@@ -154,6 +160,7 @@ def get_fear_and_greed():
     except:
         return 50, "Neutral"
 
+# --- 4. MACRO FRED (WRESBAL y GLI - Caché 6 horas) ---
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_fred_data(api_key):
     try:
@@ -165,6 +172,7 @@ def get_fred_data(api_key):
     except:
         return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
 
+# --- 5. DÓLAR DXY (Caché 30 min) ---
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_dxy_data():
     try:
@@ -173,14 +181,25 @@ def get_dxy_data():
     except:
         return pd.DataFrame()
 
-# --- PROCESAMIENTO Y CÁLCULOS ---
+# ==========================================
+# EJECUCIÓN Y CÁLCULOS
+# ==========================================
 
-# 1. Técnico BTC (Yahoo Finance)
-hist = get_btc_data()
+# 1. Precios al minuto
+live_prices = get_live_prices()
+precio_btc = live_prices["BTC-USD"]
+p_eth = live_prices["ETH-USD"]
+p_sol = live_prices["SOL-USD"]
+p_xrp = live_prices["XRP-USD"]
+p_cvx = live_prices["CVX-USD"]
+
+# 2. Análisis técnico de BTC
+hist = get_btc_history()
 if not hist.empty:
     closes = hist['Close']
     highs = hist['High']
-    precio_btc = closes.iloc[-1]
+    if precio_btc == 0.0:
+        precio_btc = closes.iloc[-1]
     
     # Banda DAC EMA 200
     ema_top = highs.ewm(span=200, adjust=False).mean().iloc[-1]
@@ -196,10 +215,7 @@ if not hist.empty:
     score_r = 10 if rsi <= 30 else (1 if rsi >= 75 else round((100 - rsi) / 10))
     score_e = 9 if precio_btc <= ema_top else (6 if precio_btc <= ema_top * 1.05 else 3)
 else:
-    precio_btc, rsi, ema_bot, ema_top, dist_ema, score_r, score_e = 0, 50, 0, 0, 0, 5, 5
-
-# 2. Descarga de Activos Clave
-p_eth, p_sol, p_xrp, p_cvx = get_alt_tickers()
+    rsi, ema_bot, ema_top, dist_ema, score_r, score_e = 50, 0, 0, 0, 5, 5
 
 # 3. Sentimiento (Fear & Greed)
 fg_val, fg_text = get_fear_and_greed()
