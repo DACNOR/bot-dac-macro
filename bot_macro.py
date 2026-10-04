@@ -27,17 +27,18 @@ st.markdown("""
     .card-box {
         background-color: #0e121a;
         border-radius: 14px;
-        padding: 20px 22px;
+        padding: 22px 24px;
         border: 1px solid #1a2232;
         margin-bottom: 16px;
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
     }
 
+    /* Títulos de tarjetas más grandes y destacados */
     .card-title { 
-        color: #7d8590; 
-        font-size: 13px; 
-        font-weight: 700; 
-        letter-spacing: 1px; 
+        color: #9aa4b2; 
+        font-size: 15px; 
+        font-weight: 800; 
+        letter-spacing: 0.8px; 
         text-transform: uppercase;
         display: flex;
         align-items: center;
@@ -45,16 +46,17 @@ st.markdown("""
     }
     
     .card-score { 
-        font-size: 28px; 
+        font-size: 32px; 
         font-weight: 900; 
-        margin-top: 4px;
+        margin-top: 6px;
     }
     
     .card-sub { 
         color: #8b949e; 
-        font-size: 12.5px; 
+        font-size: 13.5px; 
         font-weight: 500; 
-        margin-top: 4px; 
+        margin-top: 8px; 
+        text-align: center;
     }
 
     /* Cinta de precios superior */
@@ -77,7 +79,7 @@ st.markdown("""
     /* Mini barras de progreso */
     .comp-bar-bg {
         width: 100%;
-        height: 6px;
+        height: 7px;
         background-color: #1a2232;
         border-radius: 4px;
         margin-top: 10px;
@@ -222,9 +224,8 @@ def color_by_score(val):
 # ==========================================
 # GENERADOR VISUAL: TACÓMETRO ESTILO DCAPITAL
 # ==========================================
-def render_semi_gauge(score, label_bottom, size="medium"):
+def render_semi_gauge(score, label_bottom):
     pct = max(0.0, min(100.0, float(score)))
-    # Cálculo de ángulo en semicírculo (de 180° a 0°)
     angle_deg = 180 - (pct / 100.0 * 180)
     angle_rad = math.radians(angle_deg)
     
@@ -234,9 +235,8 @@ def render_semi_gauge(score, label_bottom, size="medium"):
     
     color = color_by_score(round(pct / 10))
 
-    return f"""
-    <div style="text-align: center; margin: 0 auto; width: 100%;">
-        <svg viewBox="0 0 200 125" style="width: 100%; max-width: 250px; display: block; margin: 0 auto; overflow: visible;">
+    return f"""<div style="text-align: center; margin: 0 auto; width: 100%;">
+        <svg viewBox="0 0 200 120" style="width: 100%; max-width: 240px; display: block; margin: 0 auto; overflow: visible;">
             <defs>
                 <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
                     <stop offset="0%" stop-color="#FF4A68" />
@@ -244,19 +244,14 @@ def render_semi_gauge(score, label_bottom, size="medium"):
                     <stop offset="100%" stop-color="#00F7A5" />
                 </linearGradient>
             </defs>
-            <!-- Arco base oscuro -->
             <path d="M 25 95 A 75 75 0 0 1 175 95" fill="none" stroke="#181e2b" stroke-width="14" stroke-linecap="round" />
-            <!-- Arco gradiente de color -->
             <path d="M 25 95 A 75 75 0 0 1 175 95" fill="none" stroke="url(#gaugeGrad)" stroke-width="12" stroke-linecap="round" opacity="0.9" />
-            <!-- Punto indicador exterior -->
-            <circle cx="{pin_x}" cy="{pin_y}" r="8" fill="#ffffff" stroke="{color}" stroke-width="3" filter="drop-shadow(0 0 6px rgba(0,0,0,0.8))"/>
+            <circle cx="{pin_x}" cy="{pin_y}" r="8" fill="#ffffff" stroke="{color}" stroke-width="3" />
             <circle cx="{pin_x}" cy="{pin_y}" r="3" fill="{color}" />
-            <!-- Valor central grande -->
             <text x="100" y="88" text-anchor="middle" font-size="34" font-weight="900" fill="{color}">{int(pct)}</text>
             <text x="100" y="108" text-anchor="middle" font-size="11" font-weight="700" fill="#8b949e" letter-spacing="1">{label_bottom.upper()}</text>
         </svg>
-    </div>
-    """
+    </div>"""
 
 # ==========================================
 # RENDERIZADO DEL DASHBOARD
@@ -268,15 +263,13 @@ with c_title:
     st.markdown("<h2 style='margin:0; padding:0; font-size:26px; font-weight:900; color:#f0f6fc; letter-spacing:0.5px;'>⚡ BOT DAC MACRO</h2>", unsafe_allow_html=True)
 
 with c_assets:
-    st.markdown(f"""
-        <div class="ticker-bar">
+    st.markdown(f"""<div class="ticker-bar">
             <div class="ticker-item"><span style="color:#8b949e;">BTC:</span> <span style="color:#f5d130;">${precio_btc:,.2f}</span></div>
             <div class="ticker-item"><span style="color:#8b949e;">ETH:</span> <span style="color:#58a6ff;">${p_eth:,.2f}</span></div>
             <div class="ticker-item"><span style="color:#8b949e;">SOL:</span> <span style="color:#c084fc;">${p_sol:,.2f}</span></div>
             <div class="ticker-item"><span style="color:#8b949e;">XRP:</span> <span style="color:#00F7A5;">${p_xrp:,.4f}</span></div>
             <div class="ticker-item"><span style="color:#8b949e;">CVX:</span> <span style="color:#fb923c;">${p_cvx:,.2f}</span></div>
-        </div>
-    """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
 
 st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
 
@@ -286,83 +279,76 @@ col_main_gauge, col_top_gauges = st.columns([1.25, 2.75])
 with col_main_gauge:
     status_label = "ZONA DE COMPRA / SUELO DETECTADO" if total_score >= 70 else ("PRECAUCIÓN / ZONA DE VENTA O TECHO" if total_score <= 40 else "NEUTRAL / ESPERANDO CONFLUENCIA")
     status_col = color_by_score(round(total_score / 10))
+    gauge_html = render_semi_gauge(total_score, status_label)
     
-    st.markdown(f"""
-        <div class="card-box" style="text-align: center; min-height: 295px;">
-            <div class="card-title" style="justify-content: center; margin-bottom: 8px;">● ÍNDICE DAC CONFLUENCIA MACRO</div>
-            {render_semi_gauge(total_score, status_label)}
-            <div style="margin-top: 10px; font-size: 13.5px; font-weight: 800; color: {status_col};">
+    st.markdown(f"""<div class="card-box" style="text-align: center; min-height: 295px;">
+            <div class="card-title" style="justify-content: center; margin-bottom: 8px;">● ÍNDICE DAC CONFLUENCIA</div>
+            {gauge_html}
+            <div style="margin-top: 10px; font-size: 14px; font-weight: 800; color: {status_col};">
                 ● {status_label}
             </div>
-        </div>
-    """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
 
 with col_top_gauges:
-    # Tacómetros superiores: F, R, E
     g1, g2, g3 = st.columns(3)
     
     with g1:
-        st.markdown(f"""
-            <div class="card-box" style="text-align: center;">
+        f_gauge = render_semi_gauge(fg_val, fg_text)
+        f_col = color_by_score(score_f)
+        st.markdown(f"""<div class="card-box" style="text-align: center;">
                 <div class="card-title" style="justify-content: center;">● FEAR & GREED CRYPTO</div>
-                {render_semi_gauge(fg_val, fg_text)}
-                <div class="card-sub" style="margin-top: 8px;">Puntaje Contrario: <b style="color:{color_by_score(score_f)};">{score_f}/10</b></div>
-            </div>
-        """, unsafe_allow_html=True)
+                {f_gauge}
+                <div class="card-sub">Puntaje Contrario: <b style="color:{f_col};">{score_f}/10</b></div>
+            </div>""", unsafe_allow_html=True)
         
     with g2:
         rsi_label = "Sobreventa" if rsi < 30 else ("Sobrecompra" if rsi > 70 else "Neutral")
-        st.markdown(f"""
-            <div class="card-box" style="text-align: center;">
-                <div class="card-title" style="justify-content: center;">● WILDER RSI BTC</div>
-                {render_semi_gauge(rsi, rsi_label)}
-                <div class="card-sub" style="margin-top: 8px;">Puntaje Técnico: <b style="color:{color_by_score(score_r)};">{score_r}/10</b></div>
-            </div>
-        """, unsafe_allow_html=True)
+        r_gauge = render_semi_gauge(rsi, rsi_label)
+        r_col = color_by_score(score_r)
+        st.markdown(f"""<div class="card-box" style="text-align: center;">
+                <div class="card-title" style="justify-content: center;">● RSI BTC</div>
+                {r_gauge}
+                <div class="card-sub">Puntaje Técnico: <b style="color:{r_col};">{score_r}/10</b></div>
+            </div>""", unsafe_allow_html=True)
         
     with g3:
-        # Puntuación EMA normalizada a base 100 para el arco
         ema_pct = min(max((score_e / 10.0) * 100, 10), 100)
         ema_status = "En Soporte" if score_e >= 9 else ("Rango +5%" if score_e >= 6 else "Extensión")
-        st.markdown(f"""
-            <div class="card-box" style="text-align: center;">
-                <div class="card-title" style="justify-content: center;">● DAC EMA 200 CANAL</div>
-                {render_semi_gauge(ema_pct, ema_status)}
-                <div class="card-sub" style="margin-top: 8px;">${ema_bot:,.0f} - ${ema_top:,.0f} ({'+' if dist_ema>=0 else ''}{dist_ema:.1f}%)</div>
-            </div>
-        """, unsafe_allow_html=True)
+        e_gauge = render_semi_gauge(ema_pct, ema_status)
+        st.markdown(f"""<div class="card-box" style="text-align: center;">
+                <div class="card-title" style="justify-content: center;">● EMA 200</div>
+                {e_gauge}
+                <div class="card-sub">${ema_bot:,.0f} - ${ema_top:,.0f} ({'+' if dist_ema>=0 else ''}{dist_ema:.1f}%)</div>
+            </div>""", unsafe_allow_html=True)
 
 # 3. Nivel Inferior: Fontanería de Liquidez y Macro (L, D, M)
 st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
 m1, m2, m3 = st.columns(3)
 
 with m1:
-    st.markdown(f"""
-        <div class="card-box">
+    l_col = color_by_score(score_l)
+    st.markdown(f"""<div class="card-box">
             <div class="card-title">● L - LIQUIDEZ GLOBAL (GLI - OFFSET 91D)</div>
-            <div class="card-score" style="color:{color_by_score(score_l)};">{score_l}/10</div>
-            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_l*10}%; background-color:{color_by_score(score_l)};"></div></div>
-            <div class="card-sub">Bancos Centrales: <b>{'Expansión de Liquidez' if gli_sube else 'Contracción'}</b> (${total_gli:.2f}T)</div>
-        </div>
-    """, unsafe_allow_html=True)
+            <div class="card-score" style="color:{l_col};">{score_l}/10</div>
+            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_l*10}%; background-color:{l_col};"></div></div>
+            <div class="card-sub" style="text-align: left;">Bancos Centrales: <b>{'Expansión de Liquidez' if gli_sube else 'Contracción'}</b> (${total_gli:.2f}T)</div>
+        </div>""", unsafe_allow_html=True)
 
 with m2:
-    st.markdown(f"""
-        <div class="card-box">
+    d_col = color_by_score(score_d)
+    st.markdown(f"""<div class="card-box">
             <div class="card-title">● D - DOLLAR INDEX (DXY VS SMA 20)</div>
-            <div class="card-score" style="color:{color_by_score(score_d)};">{score_d}/10</div>
-            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_d*10}%; background-color:{color_by_score(score_d)};"></div></div>
-            <div class="card-sub">DXY: <b>{dxy_val:.2f}</b> | {'Bajista (Lubricante para Riesgo)' if dxy_bear else 'Alcista (Drenaje de Liquidez)'}</div>
-        </div>
-    """, unsafe_allow_html=True)
+            <div class="card-score" style="color:{d_col};">{score_d}/10</div>
+            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_d*10}%; background-color:{d_col};"></div></div>
+            <div class="card-sub" style="text-align: left;">DXY: <b>{dxy_val:.2f}</b> | {'Bajista (Lubricante para Riesgo)' if dxy_bear else 'Alcista (Drenaje de Liquidez)'}</div>
+        </div>""", unsafe_allow_html=True)
 
 with m3:
+    m_col = color_by_score(score_m)
     qe_label = "🟢 MODO QE (Inyección)" if modo_qe else "🔴 MODO QT (Absorción)"
-    st.markdown(f"""
-        <div class="card-box">
+    st.markdown(f"""<div class="card-box">
             <div class="card-title">● M - RESERVAS BANCARIAS FED (WRESBAL)</div>
-            <div class="card-score" style="color:{color_by_score(score_m)};">{score_m}/10</div>
-            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{color_by_score(score_m)};"></div></div>
-            <div class="card-sub">Régimen Fed: <b>{qe_label}</b> (${res_actual/1e6:.2f}T)</div>
-        </div>
-    """, unsafe_allow_html=True)
+            <div class="card-score" style="color:{m_col};">{score_m}/10</div>
+            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{m_col};"></div></div>
+            <div class="card-sub" style="text-align: left;">Régimen Fed: <b>{qe_label}</b> (${res_actual/1e6:.2f}T)</div>
+        </div>""", unsafe_allow_html=True)
