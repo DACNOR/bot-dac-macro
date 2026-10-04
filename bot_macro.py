@@ -173,17 +173,11 @@ if not hist.empty:
     gain = diff.clip(lower=0).ewm(com=13, adjust=False).mean()
     loss = (-diff.clip(upper=0)).ewm(com=13, adjust=False).mean()
     rsi = float((100 - (100 / (1 + (gain / loss)))).iloc[-1])
-    
-    # En Fuerza de Ciclo: Precio sobre EMA y RSI alcista saludable suman fuerza
-    score_rsi_fuerza = min(max(rsi / 10.0, 1.0), 10.0)
-    score_ema_fuerza = 9.0 if precio_btc >= ema_top else (6.0 if precio_btc >= ema_bot else 3.0)
 else:
     rsi, ema_bot, ema_top, dist_ema = 50.0, 0.0, 0.0, 0.0
-    score_rsi_fuerza, score_ema_fuerza = 5.0, 5.0
 
-# 2. Sentimiento Fear & Greed (En Fuerza de Ciclo: Mayor Greed = Mayor Momento Alcista)
+# 2. Sentimiento Fear & Greed
 fg_val, fg_text = get_fear_and_greed()
-score_f_fuerza = min(max(fg_val / 10.0, 1.0), 10.0)
 
 # 3. Macro FRED (WRESBAL y GLI)
 wresbal_series, walcl, ecb = get_fred_data(API_KEY)
@@ -215,26 +209,42 @@ else:
     dxy_val, dxy_bear, score_d = 100.0, False, 5
 
 # ==========================================
-# CÁLCULO DE FUERZA DE CICLO (0 - 100)
+# CÁLCULO DE FUERZA DE CICLO SEGÚN TUS BLOQUES
 # ==========================================
-total_score = int(
-    (score_f_fuerza * 0.20) +
-    (score_rsi_fuerza * 0.20) +
-    (score_ema_fuerza * 0.20) +
-    (score_l * 0.15) +
-    (score_m * 0.15) +
-    (score_d * 0.10)
-) * 10
+# Bloques:
+# Rojo: 58.000 - 77.500 (Score 10 a 35)
+# Amarillo: 77.500 - 96.000 (Score 36 a 65)
+# Verde: 96.000 - 124.000 (Score 66 a 99)
+# +124.000: Score 100 (ATH)
+
+if precio_btc < 58000:
+    total_score = 15
+    status_label = "SUELO EXTREMO / PÁNICO"
+elif precio_btc < 77500:
+    pct_bloque = (precio_btc - 58000) / (77500 - 58000)
+    total_score = int(10 + pct_bloque * 25)
+    status_label = "ZONA DE SUELO / RANGO BAJO"
+elif precio_btc < 96000:
+    pct_bloque = (precio_btc - 77500) / (96000 - 77500)
+    total_score = int(36 + pct_bloque * 29)
+    status_label = "TRANSICIÓN / IMPULSO ACTIVO"
+elif precio_btc < 124000:
+    pct_bloque = (precio_btc - 96000) / (124000 - 96000)
+    total_score = int(66 + pct_bloque * 33)
+    status_label = "EXPANSIÓN / RUMBO AL ATH"
+else:
+    total_score = 100
+    status_label = "MÁXIMOS HISTÓRICOS / NUEVO ATH"
 
 def color_by_score(val):
-    if val >= 65: return "#00F7A5"  # Verde brillante (Bull Market)
-    if val >= 40: return "#FFB020"  # Ámbar (Neutro / Transición)
-    return "#FF4A68"              # Rojo (Bear Market)
+    if val >= 66: return "#00F7A5"  # Verde brillante
+    if val >= 36: return "#FFB020"  # Ámbar / Amarillo
+    return "#FF4A68"              # Rojo
 
 # ==========================================
 # GENERADOR VISUAL: TACÓMETRO LIMPIO
 # ==========================================
-def render_semi_gauge(score, label_bottom):
+def render_semi_gauge(score, label_bottom, custom_color=None):
     pct = max(0.0, min(100.0, float(score)))
     angle_deg = 180 - (pct / 100.0 * 180)
     angle_rad = math.radians(angle_deg)
@@ -243,7 +253,7 @@ def render_semi_gauge(score, label_bottom):
     pin_x = cx + r * math.cos(angle_rad)
     pin_y = cy - r * math.sin(angle_rad)
     
-    color = color_by_score(round(pct))
+    color = custom_color if custom_color else color_by_score(round(pct))
 
     return f"""<div style="text-align: center; margin: 0 auto; width: 100%;">
         <svg viewBox="0 0 200 120" style="width: 100%; max-width: 240px; display: block; margin: 0 auto; overflow: visible;">
@@ -287,15 +297,8 @@ st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
 col_main_gauge, col_top_gauges = st.columns([1.25, 2.75])
 
 with col_main_gauge:
-    if total_score >= 65:
-        status_label = "EXPANSIÓN / BULL MARKET ACTIVO"
-    elif total_score >= 40:
-        status_label = "TRANSICIÓN / ACUMULACIÓN"
-    else:
-        status_label = "BEAR MARKET / DEBILIDAD"
-        
     status_col = color_by_score(total_score)
-    gauge_html = render_semi_gauge(total_score, "")
+    gauge_html = render_semi_gauge(total_score, "", status_col)
     
     st.markdown(f"""<div class="card-box" style="text-align: center; min-height: 295px;">
             <div class="card-title" style="justify-content: center; margin-bottom: 8px;">● SALUD Y FUERZA DEL CICLO</div>
@@ -326,9 +329,21 @@ with col_top_gauges:
             </div>""", unsafe_allow_html=True)
         
     with g3:
-        ema_pct = min(max(((precio_btc / ema_bot) - 0.5) * 100, 10), 100) if ema_bot > 0 else 50
-        ema_status = "Sobre Media" if precio_btc >= ema_top else "Bajo Media"
-        e_gauge = render_semi_gauge(ema_pct, ema_status)
+        # Si el precio supera el canal EMA superior, consideramos soporte ganado (Verde)
+        if precio_btc >= ema_top:
+            ema_score_gauge = 85
+            ema_status = "Soporte Ganado"
+            ema_col = "#00F7A5"
+        elif precio_btc >= ema_bot:
+            ema_score_gauge = 55
+            ema_status = "En Canal"
+            ema_col = "#FFB020"
+        else:
+            ema_score_gauge = 25
+            ema_status = "Bajo Media"
+            ema_col = "#FF4A68"
+            
+        e_gauge = render_semi_gauge(ema_score_gauge, ema_status, ema_col)
         st.markdown(f"""<div class="card-box" style="text-align: center;">
                 <div class="card-title" style="justify-content: center;">● EMA 200</div>
                 {e_gauge}
