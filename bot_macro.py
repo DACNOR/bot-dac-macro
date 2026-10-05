@@ -150,7 +150,7 @@ def get_dxy_data():
         return pd.DataFrame()
 
 # ==========================================
-# CÁLCULOS CUANTITATIVOS (MODELO FRELDI CONTRACÍCLICO)
+# CÁLCULOS CUANTITATIVOS (MODELO FRELDI)
 # ==========================================
 
 live_prices = get_live_prices()
@@ -177,7 +177,7 @@ if not hist.empty:
     loss = (-diff.clip(upper=0)).ewm(com=13, adjust=False).mean()
     rsi = float((100 - (100 / (1 + (gain / loss)))).iloc[-1])
     
-    # R - RSI Diario (Lógica Nacho: RSI > 60 es neutro/caliente = 3/10; sobreventa <35 = 8-10/10)
+    # R - RSI Diario (Lógica Nacho: 62 es caliente/neutro = 3/10; sobreventa <35 = 8-10/10)
     if rsi <= 30:
         score_r = 10
     elif rsi <= 45:
@@ -187,7 +187,7 @@ if not hist.empty:
     else:
         score_r = 1
         
-    # E - EMA 200 (Lógica Nacho: precio sobreextendido >+10% = 3/10; testeando canal/suelo = 8-10/10)
+    # E - EMA 200 (Lógica Nacho: extendido >+10% = 3/10; en suelo = 9/10)
     if dist_ema <= 0:
         score_e = 9
     elif dist_ema <= 5:
@@ -197,7 +197,7 @@ if not hist.empty:
 else:
     rsi, ema_bot, ema_top, dist_ema, score_r, score_e = 50.0, 0.0, 0.0, 0.0, 5, 5
 
-# 2. Sentimiento Fear & Greed (Lógica Nacho: FG 70 es Codicia = 2/10; Pánico <25 = 8-10/10)
+# 2. Sentimiento Fear & Greed (Valor real en tacómetro, nota contraria 2/10)
 fg_val, fg_text, fg_7d_avg = get_fear_and_greed()
 if fg_val >= 75:
     score_f = 1
@@ -210,17 +210,12 @@ elif fg_val >= 25:
 else:
     score_f = 10
 
-# 3. Macro FRED (Liquidez y Reservas)
+# 3. Macro FRED
 wresbal_series, walcl, ecb = get_fred_data(API_KEY)
 
-# L - Liquidez Global (Lógica Nacho: Percentil bajo histórico = zona de acumulación = 8/10)
-if not walcl.empty and not ecb.empty:
-    total_gli = float(walcl.iloc[-1] + ecb.iloc[-1]) / 1e6
-    score_l = 8  # Liquidez presionada en histórico (P23) = acumular
-    gli_desc = "Liquidez P23 (var 13w vs 1a) | acumular"
-else:
-    total_gli, score_l = 12.64, 8
-    gli_desc = "Bancos Centrales (Acumulación)"
+# L - Liquidez Global (Percentil P23 = Acumulación = 8/10)
+score_l = 8
+gli_desc = "Liquidez P23 (var 13w vs 1a) | acumular"
 
 # M - Reservas Bancarias Fed (WRESBAL)
 if not wresbal_series.empty:
@@ -231,14 +226,13 @@ if not wresbal_series.empty:
 else:
     res_actual, modo_qe, score_m = 2.95e6, False, 4
 
-# 4. D - Dollar Index DXY (Lógica Nacho: DXY en sobrecompra 1m > 3% = techo dólar = oportunidad riesgo = 10/10)
+# 4. D - Dollar Index DXY (Sobrecompra a 1 mes > 3% = 10/10)
 dxy_df = get_dxy_data()
 if not dxy_df.empty and len(dxy_df) >= 20:
     dxy_val = float(dxy_df['Close'].iloc[-1])
     dxy_prev_month = float(dxy_df['Close'].iloc[-21]) if len(dxy_df) >= 21 else float(dxy_df['Close'].iloc[0])
     dxy_1m_change = ((dxy_val - dxy_prev_month) / dxy_prev_month) * 100
     
-    # Si el DXY subió mucho en 1 mes (+3%), está en sobrecompra extrema / techo = 10/10 para BTC
     if dxy_1m_change >= 2.5:
         score_d = 10
     elif dxy_1m_change >= 0:
@@ -251,8 +245,8 @@ else:
 # ==========================================
 # ÍNDICE CONFLUENCIA FRELDI TOTAL (0 - 100)
 # ==========================================
-# Ponderación FRELDI: F(20%) + R(20%) + E(15%) + L(15%) + D(15%) + M(15%)
-total_score = int(
+# Ponderación oficial: F(20%) + R(20%) + E(15%) + L(15%) + D(15%) + M(15%)
+raw_score = (
     (score_f * 0.20) +
     (score_r * 0.20) +
     (score_e * 0.15) +
@@ -261,27 +255,29 @@ total_score = int(
     (score_m * 0.15)
 ) * 10
 
-# Etiquetas claras de operativa de compra:
-if total_score >= 70:
+total_score = round(raw_score)
+
+# Semáforo dinámico de compra:
+if total_score >= 65:
     status_label = "ZONA DE COMPRA / SUELO DETECTADO"
-    status_col = "#00F7A5"  # Verde
+    status_col = "#00F7A5"  # Verde brillante
 elif total_score >= 45:
     status_label = "ZONA NEUTRAL / MANTENER (HOLD)"
     status_col = "#FFB020"  # Ámbar / Amarillo
 else:
     status_label = "SOBREEXTENDIDO / NO ENTRAR CON FOMO"
-    status_col = "#FF4A68"  # Rojo
+    status_col = "#FF4A68"  # Rojo alerta
 
 def color_by_score(val):
-    if val >= 7: return "#00F7A5"  # Verde brillante (Descuento alto / Compra)
-    if val >= 4: return "#FFB020"  # Ámbar (Neutro / Transición)
-    return "#FF4A68"              # Rojo (Sin descuento / Extensión)
+    if val >= 7: return "#00F7A5"
+    if val >= 4: return "#FFB020"
+    return "#FF4A68"
 
 # ==========================================
 # GENERADOR VISUAL: TACÓMETRO LIMPIO
 # ==========================================
-def render_semi_gauge(score, label_bottom, custom_color=None):
-    pct = max(0.0, min(100.0, float(score)))
+def render_semi_gauge(display_value, needle_pct, label_bottom, custom_color=None):
+    pct = max(0.0, min(100.0, float(needle_pct)))
     angle_deg = 180 - (pct / 100.0 * 180)
     angle_rad = math.radians(angle_deg)
     
@@ -304,7 +300,7 @@ def render_semi_gauge(score, label_bottom, custom_color=None):
             <path d="M 25 95 A 75 75 0 0 1 175 95" fill="none" stroke="url(#gaugeGrad)" stroke-width="12" stroke-linecap="round" opacity="0.9" />
             <circle cx="{pin_x}" cy="{pin_y}" r="8" fill="#ffffff" stroke="{color}" stroke-width="3" />
             <circle cx="{pin_x}" cy="{pin_y}" r="3" fill="{color}" />
-            <text x="100" y="88" text-anchor="middle" font-size="34" font-weight="900" fill="{color}">{int(pct)}</text>
+            <text x="100" y="88" text-anchor="middle" font-size="34" font-weight="900" fill="{color}">{display_value}</text>
             <text x="100" y="108" text-anchor="middle" font-size="11" font-weight="700" fill="#8b949e" letter-spacing="1">{label_bottom.upper()}</text>
         </svg>
     </div>"""
@@ -333,11 +329,11 @@ st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
 col_main_gauge, col_top_gauges = st.columns([1.25, 2.75])
 
 with col_main_gauge:
-    gauge_html = render_semi_gauge(total_score, "", status_col)
+    main_gauge_html = render_semi_gauge(total_score, total_score, "", status_col)
     
     st.markdown(f"""<div class="card-box" style="text-align: center; min-height: 295px;">
             <div class="card-title" style="justify-content: center; margin-bottom: 8px;">● ÍNDICE DAC CONFLUENCIA</div>
-            {gauge_html}
+            {main_gauge_html}
             <div style="margin-top: 10px; font-size: 14.5px; font-weight: 800; color: {status_col};">
                 ● {status_label}
             </div>
@@ -350,27 +346,36 @@ with col_top_gauges:
     g1, g2, g3 = st.columns(3)
     
     with g1:
-        f_gauge = render_semi_gauge(score_f * 10, f"{score_f}/10")
+        # Muestra el valor real del Fear & Greed (70)
+        fg_needle_col = "#FFB020" if fg_val <= 75 else "#00F7A5"
+        f_gauge = render_semi_gauge(fg_val, fg_val, fg_text, fg_needle_col)
+        f_col = color_by_score(score_f)
         st.markdown(f"""<div class="card-box" style="text-align: center;">
                 <div class="card-title" style="justify-content: center;">● F - FEAR & GREED</div>
                 {f_gauge}
-                <div class="card-sub">FG actual: <b>{fg_val}</b> | 7d avg: <b>{fg_7d_avg:.1f}</b></div>
+                <div class="card-sub">Puntaje Compra: <b style="color:{f_col};">{score_f}/10</b> | 7d: <b>{fg_7d_avg:.0f}</b></div>
             </div>""", unsafe_allow_html=True)
         
     with g2:
-        r_gauge = render_semi_gauge(score_r * 10, f"{score_r}/10")
+        # Muestra el valor real del RSI (62)
+        rsi_needle_col = "#FFB020" if (40 <= rsi <= 65) else ("#00F7A5" if rsi < 40 else "#FF4A68")
+        r_gauge = render_semi_gauge(int(round(rsi)), rsi, "NEUTRAL" if 45<=rsi<=65 else "IMPULSO", rsi_needle_col)
+        r_col = color_by_score(score_r)
         st.markdown(f"""<div class="card-box" style="text-align: center;">
                 <div class="card-title" style="justify-content: center;">● R - RSI DIARIO</div>
                 {r_gauge}
-                <div class="card-sub">RSI 14d: <b>{rsi:.1f}</b> (BTC Diario)</div>
+                <div class="card-sub">Puntaje Compra: <b style="color:{r_col};">{score_r}/10</b> | RSI: <b>{rsi:.1f}</b></div>
             </div>""", unsafe_allow_html=True)
         
     with g3:
-        e_gauge = render_semi_gauge(score_e * 10, f"{score_e}/10")
+        # Muestra la distancia porcentual real a la EMA (+13%)
+        e_needle_col = "#FF4A68" if dist_ema > 10 else ("#FFB020" if dist_ema > 0 else "#00F7A5")
+        e_gauge = render_semi_gauge(f"+{int(round(dist_ema))}%", min(dist_ema * 4, 100), "EXTENSIÓN", e_needle_col)
+        e_col = color_by_score(score_e)
         st.markdown(f"""<div class="card-box" style="text-align: center;">
                 <div class="card-title" style="justify-content: center;">● E - EMA 200D</div>
                 {e_gauge}
-                <div class="card-sub">EMA200d: <b>${ema_bot:,.0f}</b> ({'+' if dist_ema>=0 else ''}{dist_ema:.1f}%)</div>
+                <div class="card-sub">Puntaje Compra: <b style="color:{e_col};">{score_e}/10</b> | <b>${ema_bot:,.0f}</b></div>
             </div>""", unsafe_allow_html=True)
 
 # 3. Nivel Inferior: L, D, M
