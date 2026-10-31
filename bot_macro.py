@@ -1,20 +1,3 @@
-El error `SyntaxError: expected ':'` en la línea 225 ocurre porque al copiar o editar en GitHub se quedó una línea incompleta con `elif fg` sin terminar de escribir la condición ni los dos puntos.
-
-Aquí tienes el código completo, limpio y verificado sintácticamente para que funcione sin ningún fallo.
-
----
-
-### Pasos en GitHub:
-
-1. Entra en tu repositorio y abre el archivo `bot_macro.py`.
-2. Pulsa el icono del **lápiz**.
-3. Selecciona **todo el contenido** y bórralo.
-4. Pega el bloque de código completo que tienes aquí abajo.
-5. Haz clic en **Commit changes...**.
-
----
-
-```python
 import streamlit as st
 import requests
 import pandas as pd
@@ -492,7 +475,3 @@ with m3:
             <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{m_col};"></div></div>
             <div class="card-sub" style="text-align: left;">Régimen Fed: <b>{qe_label}</b> (${res_actual/1e6:.2f}T)</div>
         </div>""", unsafe_allow_html=True)
-
-```
-
-Guarda el commit en GitHub y refresca Streamlit Cloud; la aplicación cargará de inmediato y sin errores sintácticos.
