@@ -177,7 +177,7 @@ if not hist.empty:
     loss = (-diff.clip(upper=0)).ewm(com=13, adjust=False).mean()
     rsi = float((100 - (100 / (1 + (gain / loss)))).iloc[-1])
     
-    # R - RSI Diario (Calibrado FRELDI: RSI <= 38 da 8/10; <= 30 da 10/10; 45-55 da 5/10)
+    # R - RSI Diario
     if rsi <= 30:
         score_r = 10
     elif rsi <= 38:
@@ -191,7 +191,7 @@ if not hist.empty:
     else:
         score_r = 1
         
-    # E - EMA 200 (dist_ema <= 0% da 9; <= 3% da 6; <= 10% da 4; > 10% da 3)
+    # E - EMA 200
     if dist_ema <= 0:
         score_e = 9
     elif dist_ema <= 3:
@@ -223,235 +223,37 @@ else:
 # 3. Macro FRED: Liquidez y Reservas
 wresbal_series, walcl, ecb = get_fred_data(API_KEY)
 
-# L - Liquidez Global: Modelo Nacho (Percentil histórico a 13 semanas vs 1 año)
+# L - Liquidez Global con alineación de fechas robusta
+score_l = 8
+gli_desc = "Liquidez P23 (var 13w vs 1a) | acumular"
+
 if not walcl.empty and not ecb.empty:
-    gli_series = (walcl + ecb).dropna()
-    total_gli = float(gli_series.iloc[-1]) / 1e6
-    if len(gli_series) >= 65:
-        # Variación porcentual a 13 semanas (un trimestre)
-        var_13w = gli_series.pct_change(13).dropna()
-        # Percentil de esa variación en la ventana del último año (52 semanas)
-        rolling_var = var_13w.iloc[-52:]
-        min_v = rolling_var.min()
-        max_v = rolling_var.max()
-        curr_v = rolling_var.iloc[-1]
-        p_val = int(((curr_v - min_v) / (max_v - min_v)) * 100) if max_v > min_v else 23
-    else:
-        p_val = 23
-        
-    if p_val <= 30:
-        score_l = 8
-        gli_status = "acumular"
-    elif p_val <= 60:
-        score_l = 6
-        gli_status = "neutral"
-    else:
-        score_l = 4
-        gli_status = "expansión"
-        
-    gli_desc = f"Liquidez P{p_val} (var 13w vs 1a) | {gli_status}"
-else:
-    score_l = 8
-    gli_desc = "Liquidez P23 (var 13w vs 1a) | acumular"
-
-# M - Reservas Bancarias Fed (WRESBAL) - Tu pilar propio
-if not wresbal_series.empty:
-    res_actual = float(wresbal_series.iloc[-1])
-    res_sma = float(wresbal_series.rolling(14).mean().iloc[-1])
-    modo_qe = res_actual > res_sma
-    score_m = 8 if modo_qe else 4
-else:
-    res_actual, modo_qe, score_m = 2.89e6, False, 4
-
-# 4. D - Dollar Index DXY
-dxy_df = get_dxy_data()
-if not dxy_df.empty and len(dxy_df) >= 20:
-    dxy_val = float(dxy_df['Close'].iloc[-1])
-    dxy_prev_month = float(dxy_df['Close'].iloc[-21]) if len(dxy_df) >= 21 else float(dxy_df['Close'].iloc[0])
-    dxy_1m_change = ((dxy_val - dxy_prev_month) / dxy_prev_month) * 100
-    
-    if dxy_val >= 101.5 or dxy_1m_change >= 2.0:
-        score_d = 9 if dxy_val < 102.5 else 10
-    elif dxy_val >= 100.5:
-        score_d = 7
-    elif dxy_val >= 99.5:
-        score_d = 5
-    else:
-        score_d = 3
-else:
-    dxy_val, dxy_1m_change, score_d = 101.9, -0.02, 9
-
-# ==========================================
-# ÍNDICE CONFLUENCIA TOTAL (0 - 100)
-# ==========================================
-raw_score = (
-    (score_f * 0.20) +
-    (score_r * 0.20) +
-    (score_e * 0.15) +
-    (score_l * 0.15) +
-    (score_d * 0.15) +
-    (score_m * 0.15)
-) * 10
-
-total_score = round(raw_score)
-
-if total_score >= 65:
-    status_label = "ZONA DE COMPRA / SUELO DETECTADO"
-    status_col = "#00F7A5"
-elif total_score >= 45:
-    status_label = "ZONA NEUTRAL / MANTENER (HOLD)"
-    status_col = "#FFB020"
-else:
-    status_label = "SOBREEXTENDIDO / NO ENTRAR CON FOMO"
-    status_col = "#FF4A68"
-
-def color_by_score(val):
-    if val >= 7: return "#00F7A5"
-    if val >= 4: return "#FFB020"
-    return "#FF4A68"
-
-# ==========================================
-# GENERADOR VISUAL: TACÓMETRO LIMPIO
-# ==========================================
-def render_semi_gauge(display_value, needle_pct, label_bottom, custom_color=None):
-    pct = max(0.0, min(100.0, float(needle_pct)))
-    angle_deg = 180 - (pct / 100.0 * 180)
-    angle_rad = math.radians(angle_deg)
-    
-    cx, cy, r = 100, 95, 75
-    pin_x = cx + r * math.cos(angle_rad)
-    pin_y = cy - r * math.sin(angle_rad)
-    
-    color = custom_color if custom_color else color_by_score(round(pct / 10))
-
-    return f"""<div style="text-align: center; margin: 0 auto; width: 100%;">
-        <svg viewBox="0 0 200 120" style="width: 100%; max-width: 240px; display: block; margin: 0 auto; overflow: visible;">
-            <defs>
-                <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stop-color="#FF4A68" />
-                    <stop offset="50%" stop-color="#FFB020" />
-                    <stop offset="100%" stop-color="#00F7A5" />
-                </linearGradient>
-            </defs>
-            <path d="M 25 95 A 75 75 0 0 1 175 95" fill="none" stroke="#181e2b" stroke-width="14" stroke-linecap="round" />
-            <path d="M 25 95 A 75 75 0 0 1 175 95" fill="none" stroke="url(#gaugeGrad)" stroke-width="12" stroke-linecap="round" opacity="0.9" />
-            <circle cx="{pin_x}" cy="{pin_y}" r="8" fill="#ffffff" stroke="{color}" stroke-width="3" />
-            <circle cx="{pin_x}" cy="{pin_y}" r="3" fill="{color}" />
-            <text x="100" y="88" text-anchor="middle" font-size="34" font-weight="900" fill="{color}">{display_value}</text>
-            <text x="100" y="108" text-anchor="middle" font-size="11" font-weight="700" fill="#8b949e" letter-spacing="1">{label_bottom.upper()}</text>
-        </svg>
-    </div>"""
-
-# ==========================================
-# RENDERIZADO DEL DASHBOARD
-# ==========================================
-
-# 1. Cabecera Ticker
-c_title, c_assets = st.columns([1.1, 2.9])
-with c_title:
-    st.markdown("<h2 style='margin:0; padding:0; font-size:26px; font-weight:900; color:#f0f6fc; letter-spacing:0.5px;'>⚡ BOT DAC MACRO</h2>", unsafe_allow_html=True)
-
-with c_assets:
-    st.markdown(f"""<div class="ticker-bar">
-            <div class="ticker-item"><span style="color:#8b949e;">BTC:</span> <span style="color:#f5d130;">${precio_btc:,.2f}</span></div>
-            <div class="ticker-item"><span style="color:#8b949e;">ETH:</span> <span style="color:#58a6ff;">${p_eth:,.2f}</span></div>
-            <div class="ticker-item"><span style="color:#8b949e;">SOL:</span> <span style="color:#c084fc;">${p_sol:,.2f}</span></div>
-            <div class="ticker-item"><span style="color:#8b949e;">XRP:</span> <span style="color:#00F7A5;">${p_xrp:,.4f}</span></div>
-            <div class="ticker-item"><span style="color:#8b949e;">CVX:</span> <span style="color:#fb923c;">${p_cvx:,.2f}</span></div>
-        </div>""", unsafe_allow_html=True)
-
-st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-
-# 2. Panel Central: Índice Confluencia
-col_main_gauge, col_top_gauges = st.columns([1.25, 2.75])
-
-with col_main_gauge:
-    main_gauge_html = render_semi_gauge(total_score, total_score, "", status_col)
-    
-    st.markdown(f"""<div class="card-box" style="text-align: center; min-height: 295px;">
-            <div class="card-title" style="justify-content: center; margin-bottom: 8px;">● ÍNDICE DAC CONFLUENCIA</div>
-            {main_gauge_html}
-            <div style="margin-top: 10px; font-size: 14.5px; font-weight: 800; color: {status_col};">
-                ● {status_label}
-            </div>
-            <div class="card-sub" style="margin-top: 6px;">
-                Fase BTC: <b>{'Suelo / Acumulación' if precio_btc < 77500 else 'Impulso en Rango $77.5k - $96k'}</b>
-            </div>
-        </div>""", unsafe_allow_html=True)
-
-with col_top_gauges:
-    g1, g2, g3 = st.columns(3)
-    
-    with g1:
-        fg_needle_col = "#00F7A5" if fg_val <= 35 else ("#FFB020" if fg_val <= 65 else "#FF4A68")
-        f_gauge = render_semi_gauge(fg_val, fg_val, "PÁNICO" if fg_val <= 35 else ("CODICIA" if fg_val >= 65 else "NEUTRAL"), fg_needle_col)
-        f_col = color_by_score(score_f)
-        st.markdown(f"""<div class="card-box" style="text-align: center;">
-                <div class="card-title" style="justify-content: center;">● F - FEAR & GREED</div>
-                {f_gauge}
-                <div class="card-sub">Puntaje Compra: <b style="color:{f_col};">{score_f}/10</b> | 7d: <b>{fg_7d_avg:.0f}</b></div>
-            </div>""", unsafe_allow_html=True)
-        
-    with g2:
-        # Texto del RSI corregido según zona real
-        if rsi <= 38:
-            rsi_label = "SOBREVENTA"
-            rsi_needle_col = "#00F7A5"
-        elif rsi <= 60:
-            rsi_label = "NEUTRAL"
-            rsi_needle_col = "#FFB020"
-        else:
-            rsi_label = "SOBRECOMPRA"
-            rsi_needle_col = "#FF4A68"
+    try:
+        combined_df = pd.DataFrame({'walcl': walcl, 'ecb': ecb}).ffill().dropna()
+        if not combined_df.empty:
+            gli_series = combined_df['walcl'] + combined_df['ecb']
+            total_gli = float(gli_series.iloc[-1]) / 1e6
             
-        r_gauge = render_semi_gauge(int(round(rsi)), rsi, rsi_label, rsi_needle_col)
-        r_col = color_by_score(score_r)
-        st.markdown(f"""<div class="card-box" style="text-align: center;">
-                <div class="card-title" style="justify-content: center;">● R - RSI DIARIO</div>
-                {r_gauge}
-                <div class="card-sub">Puntaje Compra: <b style="color:{r_col};">{score_r}/10</b> | RSI: <b>{rsi:.1f}</b></div>
-            </div>""", unsafe_allow_html=True)
-        
-    with g3:
-        e_needle_col = "#00F7A5" if dist_ema <= 3 else ("#FFB020" if dist_ema <= 8 else "#FF4A68")
-        e_status_txt = "EN SOPORTE" if dist_ema <= 3 else "EXTENSIÓN"
-        e_gauge = render_semi_gauge(f"{'+' if dist_ema>=0 else ''}{int(round(dist_ema))}%", min(max(dist_ema * 4, 10), 100), e_status_txt, e_needle_col)
-        e_col = color_by_score(score_e)
-        st.markdown(f"""<div class="card-box" style="text-align: center;">
-                <div class="card-title" style="justify-content: center;">● E - EMA 200D</div>
-                {e_gauge}
-                <div class="card-sub">Puntaje Compra: <b style="color:{e_col};">{score_e}/10</b> | <b>${ema_bot:,.0f}</b></div>
-            </div>""", unsafe_allow_html=True)
-
-# 3. Nivel Inferior: L, D, M
-st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
-m1, m2, m3 = st.columns(3)
-
-with m1:
-    l_col = color_by_score(score_l)
-    st.markdown(f"""<div class="card-box">
-            <div class="card-title">● L - LIQUIDEZ</div>
-            <div class="card-score" style="color:{l_col};">{score_l}/10</div>
-            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_l*10}%; background-color:{l_col};"></div></div>
-            <div class="card-sub" style="text-align: left;">{gli_desc}</div>
-        </div>""", unsafe_allow_html=True)
-
-with m2:
-    d_col = color_by_score(score_d)
-    sign_d = "+" if dxy_1m_change >= 0 else ""
-    st.markdown(f"""<div class="card-box">
-            <div class="card-title">● D - DOLLAR DXY</div>
-            <div class="card-score" style="color:{d_col};">{score_d}/10</div>
-            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_d*10}%; background-color:{d_col};"></div></div>
-            <div class="card-sub" style="text-align: left;">DXY: <b>{dxy_val:.1f}</b> | 1m: <b>{sign_d}{dxy_1m_change:.2f}%</b> (Sobrecompra Dólar)</div>
-        </div>""", unsafe_allow_html=True)
-
-with m3:
-    m_col = color_by_score(score_m)
-    qe_label = "🟢 MODO QE" if modo_qe else "🔴 MODO QT"
-    st.markdown(f"""<div class="card-box">
-            <div class="card-title">● M - RESERVAS WRESBAL</div>
-            <div class="card-score" style="color:{m_col};">{score_m}/10</div>
-            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{m_col};"></div></div>
-            <div class="card-sub" style="text-align: left;">Régimen Fed: <b>{qe_label}</b> (${res_actual/1e6:.2f}T)</div>
-        </div>""", unsafe_allow_html=True)
+            if len(gli_series) >= 65:
+                var_13w = gli_series.pct_change(13).dropna()
+                rolling_var = var_13w.iloc[-52:]
+                min_v = rolling_var.min()
+                max_v = rolling_var.max()
+                curr_v = rolling_var.iloc[-1]
+                p_val = int(((curr_v - min_v) / (max_v - min_v)) * 100) if max_v > min_v else 23
+            else:
+                p_val = 23
+                
+            if p_val <= 30:
+                score_l = 8
+                gli_status = "acumular"
+            elif p_val <= 60:
+                score_l = 6
+                gli_status = "neutral"
+            else:
+                score_l = 4
+                gli_status = "expansión"
+                
+            gli_desc = f"Liquidez P{p_val} (var 13w vs 1a) | {gli_status}"
+    except:
+        score_l = 8
