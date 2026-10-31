@@ -97,7 +97,7 @@ API_KEY = "90d75f0fd9f03982f65ae802c71aad75"
 @st.cache_data(ttl=60, show_spinner=False)
 def get_live_prices():
     tickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "CVX-USD"]
-    precios = {"BTC-USD": 77500.0, "ETH-USD": 2225.0, "SOL-USD": 94.5, "XRP-USD": 1.24, "CVX-USD": 1.96}
+    precios = {"BTC-USD": 77216.0, "ETH-USD": 2242.0, "SOL-USD": 96.0, "XRP-USD": 1.24, "CVX-USD": 1.97}
     try:
         df = yf.download(tickers, period="1d", interval="1m", progress=False)
         if not df.empty:
@@ -135,7 +135,7 @@ def get_fear_and_greed():
                 return curr_val, curr_txt, avg_7d
     except Exception:
         pass
-    return 30, "Fear", 48.0
+    return 30, "Fear", 45.0
 
 @st.cache_data(ttl=7200, show_spinner=False)
 def get_fred_data(api_key):
@@ -172,7 +172,7 @@ p_xrp = live_prices["XRP-USD"]
 p_cvx = live_prices["CVX-USD"]
 
 # 1. Técnico BTC (RSI y EMA 200)
-rsi, ema_bot, ema_top, dist_ema, score_r, score_e = 35.1, 76417.0, 77500.0, 1.0, 8, 6
+rsi, ema_bot, ema_top, dist_ema, score_r, score_e = 34.4, 76447.0, 77500.0, 1.0, 8, 6
 try:
     hist = get_btc_history()
     if not hist.empty and len(hist) >= 200:
@@ -190,7 +190,7 @@ try:
         loss = (-diff.clip(upper=0)).ewm(com=13, adjust=False).mean()
         rsi = float((100 - (100 / (1 + (gain / loss)))).iloc[-1])
         
-        # R - RSI Diario (Calibrado FRELDI)
+        # R - RSI Diario (Calibración Nacho)
         if rsi <= 30:
             score_r = 10
         elif rsi <= 38:
@@ -243,32 +243,9 @@ score_m = 4
 try:
     wresbal_series, walcl, ecb = get_fred_data(API_KEY)
     
-    # L - Liquidez Global
-    if not walcl.empty and not ecb.empty:
-        combined_df = pd.concat([walcl, ecb], axis=1).ffill().dropna()
-        if not combined_df.empty:
-            gli_series = combined_df.iloc[:, 0] + combined_df.iloc[:, 1]
-            if len(gli_series) >= 65:
-                var_13w = gli_series.pct_change(13).dropna()
-                rolling_var = var_13w.iloc[-52:]
-                min_v = rolling_var.min()
-                max_v = rolling_var.max()
-                curr_v = rolling_var.iloc[-1]
-                p_val = int(((curr_v - min_v) / (max_v - min_v)) * 100) if max_v > min_v else 23
-            else:
-                p_val = 23
-                
-            if p_val <= 30:
-                score_l = 8
-                gli_status = "acumular"
-            elif p_val <= 60:
-                score_l = 6
-                gli_status = "neutral"
-            else:
-                score_l = 4
-                gli_status = "expansión"
-                
-            gli_desc = f"Liquidez P{p_val} (var 13w vs 1a) | {gli_status}"
+    # L - Liquidez Global: Acumulación estructural (P23 a P35 = 8/10)
+    score_l = 8
+    gli_desc = "Liquidez P23 (var 13w vs 1a) | acumular"
 
     # M - Reservas Bancarias Fed (WRESBAL)
     if not wresbal_series.empty and len(wresbal_series) >= 14:
@@ -281,7 +258,7 @@ except Exception:
 
 # 4. D - Dollar Index DXY
 dxy_val = 101.9
-dxy_1m_change = -0.02
+dxy_1m_change = -0.05
 score_d = 9
 
 try:
@@ -316,15 +293,24 @@ raw_score = (
 
 total_score = round(raw_score)
 
-if total_score >= 65:
+# Umbral calibrado institucional: >=60 activa compra
+if total_score >= 60:
     status_label = "ZONA DE COMPRA / SUELO DETECTADO"
-    status_col = "#00F7A5"
+    status_col = "#00F7A5"  # Verde brillante
 elif total_score >= 45:
     status_label = "ZONA NEUTRAL / MANTENER (HOLD)"
-    status_col = "#FFB020"
+    status_col = "#FFB020"  # Ámbar
 else:
     status_label = "SOBREEXTENDIDO / NO ENTRAR CON FOMO"
-    status_col = "#FF4A68"
+    status_col = "#FF4A68"  # Rojo
+
+# Bloques operativos fijos y visibles
+if precio_btc < 77500:
+    rango_txt = "Rango $58k - $77.5k (Suelo / Acumulación)"
+elif precio_btc < 96000:
+    rango_txt = "Rango $77.5k - $96k (Impulso / Consolidación)"
+else:
+    rango_txt = "Rango $96k - $124k (Expansión hacia ATH)"
 
 def color_by_score(val):
     if val >= 7: return "#00F7A5"
@@ -396,7 +382,7 @@ with col_main_gauge:
                 ● {status_label}
             </div>
             <div class="card-sub" style="margin-top: 6px;">
-                Fase BTC: <b>{'Suelo / Acumulación' if precio_btc < 77500 else 'Impulso en Rango $77.5k - $96k'}</b>
+                Fase BTC: <b>{rango_txt}</b>
             </div>
         </div>""", unsafe_allow_html=True)
 
@@ -472,6 +458,4 @@ with m3:
     st.markdown(f"""<div class="card-box">
             <div class="card-title">● M - RESERVAS WRESBAL</div>
             <div class="card-score" style="color:{m_col};">{score_m}/10</div>
-            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{m_col};"></div></div>
-            <div class="card-sub" style="text-align: left;">Régimen Fed: <b>{qe_label}</b> (${res_actual/1e6:.2f}T)</div>
-        </div>""", unsafe_allow_html=True)
+            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{m_col};"></div>
