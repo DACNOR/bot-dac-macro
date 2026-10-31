@@ -190,7 +190,7 @@ try:
         loss = (-diff.clip(upper=0)).ewm(com=13, adjust=False).mean()
         rsi = float((100 - (100 / (1 + (gain / loss)))).iloc[-1])
         
-        # R - RSI Diario (Calibración Nacho)
+        # R - RSI Diario
         if rsi <= 30:
             score_r = 10
         elif rsi <= 38:
@@ -293,7 +293,7 @@ raw_score = (
 
 total_score = round(raw_score)
 
-# Umbral calibrado institucional: >=60 activa compra
+# Umbral calibrado institucional: >= 60 activa compra
 if total_score >= 60:
     status_label = "ZONA DE COMPRA / SUELO DETECTADO"
     status_col = "#00F7A5"  # Verde brillante
@@ -304,7 +304,7 @@ else:
     status_label = "SOBREEXTENDIDO / NO ENTRAR CON FOMO"
     status_col = "#FF4A68"  # Rojo
 
-# Bloques operativos fijos y visibles
+# Bloques de precio fijos y visibles
 if precio_btc < 77500:
     rango_txt = "Rango $58k - $77.5k (Suelo / Acumulación)"
 elif precio_btc < 96000:
@@ -458,4 +458,6 @@ with m3:
     st.markdown(f"""<div class="card-box">
             <div class="card-title">● M - RESERVAS WRESBAL</div>
             <div class="card-score" style="color:{m_col};">{score_m}/10</div>
-            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{m_col};"></div>
+            <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{m_col};"></div></div>
+            <div class="card-sub" style="text-align: left;">Régimen Fed: <b>{qe_label}</b> (${res_actual/1e6:.2f}T)</div>
+        </div>""", unsafe_allow_html=True)
