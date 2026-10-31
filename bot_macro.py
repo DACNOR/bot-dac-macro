@@ -130,7 +130,7 @@ def get_fear_and_greed():
     except:
         return 50, "Neutral", 50.0
 
-@st.cache_data(ttl=21600, show_spinner=False)
+@st.cache_data(ttl=7200, show_spinner=False)
 def get_fred_data(api_key):
     try:
         fred = Fred(api_key=api_key)
@@ -150,7 +150,7 @@ def get_dxy_data():
         return pd.DataFrame()
 
 # ==========================================
-# CÁLCULOS CUANTITATIVOS (MODELO FRELDI CALIBRADO)
+# CÁLCULOS CUANTITATIVOS
 # ==========================================
 
 live_prices = get_live_prices()
@@ -177,9 +177,11 @@ if not hist.empty:
     loss = (-diff.clip(upper=0)).ewm(com=13, adjust=False).mean()
     rsi = float((100 - (100 / (1 + (gain / loss)))).iloc[-1])
     
-    # R - RSI Diario (50-55 es neutral = 5/10; >65 = 2-3/10; <35 = 8-10/10)
-    if rsi <= 35:
-        score_r = 9
+    # R - RSI Diario (Calibrado FRELDI: RSI <= 38 da 8/10; <= 30 da 10/10; 45-55 da 5/10)
+    if rsi <= 30:
+        score_r = 10
+    elif rsi <= 38:
+        score_r = 8
     elif rsi <= 45:
         score_r = 7
     elif rsi <= 55:
@@ -187,12 +189,12 @@ if not hist.empty:
     elif rsi <= 65:
         score_r = 3
     else:
-        score_r = 2
+        score_r = 1
         
-    # E - EMA 200 (distancia +6% a +10% = 4/10; >+10% = 3/10; en suelo <= 0% = 9/10)
+    # E - EMA 200 (dist_ema <= 0% da 9; <= 3% da 6; <= 10% da 4; > 10% da 3)
     if dist_ema <= 0:
         score_e = 9
-    elif dist_ema <= 5:
+    elif dist_ema <= 3:
         score_e = 6
     elif dist_ema <= 10:
         score_e = 4
@@ -203,38 +205,44 @@ else:
 
 # 2. Sentimiento Fear & Greed
 fg_val, fg_text, fg_7d_avg = get_fear_and_greed()
-if fg_val >= 75:
-    score_f = 1
-elif fg_val >= 65:
-    score_f = 2
-elif fg_val >= 55:
-    score_f = 3
-elif fg_val >= 45:
-    score_f = 5
-elif fg_val >= 30:
-    score_f = 7
-else:
+if fg_val <= 25:
     score_f = 10
+elif fg_val <= 35:
+    score_f = 7
+elif fg_val <= 45:
+    score_f = 6
+elif fg_val <= 55:
+    score_f = 5
+elif fg_val <= 65:
+    score_f = 3
+elif fg_val <= 75:
+    score_f = 2
+else:
+    score_f = 1
 
 # 3. Macro FRED: Liquidez y Reservas
 wresbal_series, walcl, ecb = get_fred_data(API_KEY)
 
-# L - Liquidez Global con Percentil de Nacho (var 13w vs 1a)
+# L - Liquidez Global: Modelo Nacho (Percentil histórico a 13 semanas vs 1 año)
 if not walcl.empty and not ecb.empty:
-    total_gli = float(walcl.iloc[-1] + ecb.iloc[-1]) / 1e6
     gli_series = (walcl + ecb).dropna()
-    if len(gli_series) >= 52:
-        rolling_min = gli_series.rolling(52).min().iloc[-1]
-        rolling_max = gli_series.rolling(52).max().iloc[-1]
-        current_gli_val = gli_series.iloc[-1]
-        p_val = int(((current_gli_val - rolling_min) / (rolling_max - rolling_min)) * 100) if rolling_max > rolling_min else 35
+    total_gli = float(gli_series.iloc[-1]) / 1e6
+    if len(gli_series) >= 65:
+        # Variación porcentual a 13 semanas (un trimestre)
+        var_13w = gli_series.pct_change(13).dropna()
+        # Percentil de esa variación en la ventana del último año (52 semanas)
+        rolling_var = var_13w.iloc[-52:]
+        min_v = rolling_var.min()
+        max_v = rolling_var.max()
+        curr_v = rolling_var.iloc[-1]
+        p_val = int(((curr_v - min_v) / (max_v - min_v)) * 100) if max_v > min_v else 23
     else:
-        p_val = 39
+        p_val = 23
         
-    if p_val <= 25:
+    if p_val <= 30:
         score_l = 8
         gli_status = "acumular"
-    elif p_val <= 50:
+    elif p_val <= 60:
         score_l = 6
         gli_status = "neutral"
     else:
@@ -243,30 +251,27 @@ if not walcl.empty and not ecb.empty:
         
     gli_desc = f"Liquidez P{p_val} (var 13w vs 1a) | {gli_status}"
 else:
-    score_l = 6
-    gli_desc = "Liquidez P39 (var 13w vs 1a) | neutral"
+    score_l = 8
+    gli_desc = "Liquidez P23 (var 13w vs 1a) | acumular"
 
-# M - Reservas Bancarias Fed (WRESBAL)
+# M - Reservas Bancarias Fed (WRESBAL) - Tu pilar propio
 if not wresbal_series.empty:
     res_actual = float(wresbal_series.iloc[-1])
     res_sma = float(wresbal_series.rolling(14).mean().iloc[-1])
     modo_qe = res_actual > res_sma
     score_m = 8 if modo_qe else 4
 else:
-    res_actual, modo_qe, score_m = 3.02e6, True, 8
+    res_actual, modo_qe, score_m = 2.89e6, False, 4
 
-# 4. D - Dollar Index DXY (Calibración Nacho: DXY en zona alta >101.5 es sobrecompra y techo = 9-10/10)
+# 4. D - Dollar Index DXY
 dxy_df = get_dxy_data()
 if not dxy_df.empty and len(dxy_df) >= 20:
     dxy_val = float(dxy_df['Close'].iloc[-1])
     dxy_prev_month = float(dxy_df['Close'].iloc[-21]) if len(dxy_df) >= 21 else float(dxy_df['Close'].iloc[0])
     dxy_1m_change = ((dxy_val - dxy_prev_month) / dxy_prev_month) * 100
     
-    # Si DXY está sobre 101.5, está en techo macro / resistencia mayor -> 9/10 o 10/10
-    if dxy_val >= 102.0 or dxy_1m_change >= 2.0:
-        score_d = 10
-    elif dxy_val >= 101.3:
-        score_d = 9
+    if dxy_val >= 101.5 or dxy_1m_change >= 2.0:
+        score_d = 9 if dxy_val < 102.5 else 10
     elif dxy_val >= 100.5:
         score_d = 7
     elif dxy_val >= 99.5:
@@ -274,10 +279,10 @@ if not dxy_df.empty and len(dxy_df) >= 20:
     else:
         score_d = 3
 else:
-    dxy_val, dxy_1m_change, score_d = 101.63, 1.22, 9
+    dxy_val, dxy_1m_change, score_d = 101.9, -0.02, 9
 
 # ==========================================
-# ÍNDICE CONFLUENCIA FRELDI TOTAL (0 - 100)
+# ÍNDICE CONFLUENCIA TOTAL (0 - 100)
 # ==========================================
 raw_score = (
     (score_f * 0.20) +
@@ -357,7 +362,7 @@ with c_assets:
 
 st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
 
-# 2. Panel Central: Índice FRELDI Confluencia
+# 2. Panel Central: Índice Confluencia
 col_main_gauge, col_top_gauges = st.columns([1.25, 2.75])
 
 with col_main_gauge:
@@ -370,7 +375,7 @@ with col_main_gauge:
                 ● {status_label}
             </div>
             <div class="card-sub" style="margin-top: 6px;">
-                Fase BTC: <b>Impulso en Rango $77.5k - $96k</b>
+                Fase BTC: <b>{'Suelo / Acumulación' if precio_btc < 77500 else 'Impulso en Rango $77.5k - $96k'}</b>
             </div>
         </div>""", unsafe_allow_html=True)
 
@@ -378,8 +383,8 @@ with col_top_gauges:
     g1, g2, g3 = st.columns(3)
     
     with g1:
-        fg_needle_col = "#FFB020" if fg_val <= 75 else "#00F7A5"
-        f_gauge = render_semi_gauge(fg_val, fg_val, fg_text, fg_needle_col)
+        fg_needle_col = "#00F7A5" if fg_val <= 35 else ("#FFB020" if fg_val <= 65 else "#FF4A68")
+        f_gauge = render_semi_gauge(fg_val, fg_val, "PÁNICO" if fg_val <= 35 else ("CODICIA" if fg_val >= 65 else "NEUTRAL"), fg_needle_col)
         f_col = color_by_score(score_f)
         st.markdown(f"""<div class="card-box" style="text-align: center;">
                 <div class="card-title" style="justify-content: center;">● F - FEAR & GREED</div>
@@ -388,8 +393,18 @@ with col_top_gauges:
             </div>""", unsafe_allow_html=True)
         
     with g2:
-        rsi_needle_col = "#FFB020" if (40 <= rsi <= 65) else ("#00F7A5" if rsi < 40 else "#FF4A68")
-        r_gauge = render_semi_gauge(int(round(rsi)), rsi, "NEUTRAL" if 45<=rsi<=65 else "IMPULSO", rsi_needle_col)
+        # Texto del RSI corregido según zona real
+        if rsi <= 38:
+            rsi_label = "SOBREVENTA"
+            rsi_needle_col = "#00F7A5"
+        elif rsi <= 60:
+            rsi_label = "NEUTRAL"
+            rsi_needle_col = "#FFB020"
+        else:
+            rsi_label = "SOBRECOMPRA"
+            rsi_needle_col = "#FF4A68"
+            
+        r_gauge = render_semi_gauge(int(round(rsi)), rsi, rsi_label, rsi_needle_col)
         r_col = color_by_score(score_r)
         st.markdown(f"""<div class="card-box" style="text-align: center;">
                 <div class="card-title" style="justify-content: center;">● R - RSI DIARIO</div>
@@ -398,8 +413,9 @@ with col_top_gauges:
             </div>""", unsafe_allow_html=True)
         
     with g3:
-        e_needle_col = "#FF4A68" if dist_ema > 10 else ("#FFB020" if dist_ema > 0 else "#00F7A5")
-        e_gauge = render_semi_gauge(f"+{int(round(dist_ema))}%", min(dist_ema * 4, 100), "EXTENSIÓN", e_needle_col)
+        e_needle_col = "#00F7A5" if dist_ema <= 3 else ("#FFB020" if dist_ema <= 8 else "#FF4A68")
+        e_status_txt = "EN SOPORTE" if dist_ema <= 3 else "EXTENSIÓN"
+        e_gauge = render_semi_gauge(f"{'+' if dist_ema>=0 else ''}{int(round(dist_ema))}%", min(max(dist_ema * 4, 10), 100), e_status_txt, e_needle_col)
         e_col = color_by_score(score_e)
         st.markdown(f"""<div class="card-box" style="text-align: center;">
                 <div class="card-title" style="justify-content: center;">● E - EMA 200D</div>
