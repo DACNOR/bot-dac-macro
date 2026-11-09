@@ -97,7 +97,7 @@ API_KEY = "90d75f0fd9f03982f65ae802c71aad75"
 @st.cache_data(ttl=60, show_spinner=False)
 def get_live_prices():
     tickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "CVX-USD"]
-    precios = {"BTC-USD": 77216.0, "ETH-USD": 2242.0, "SOL-USD": 96.0, "XRP-USD": 1.24, "CVX-USD": 1.97}
+    precios = {"BTC-USD": 74800.0, "ETH-USD": 2126.0, "SOL-USD": 86.6, "XRP-USD": 1.09, "CVX-USD": 1.80}
     try:
         df = yf.download(tickers, period="1d", interval="1m", progress=False)
         if not df.empty:
@@ -135,7 +135,7 @@ def get_fear_and_greed():
                 return curr_val, curr_txt, avg_7d
     except Exception:
         pass
-    return 30, "Fear", 45.0
+    return 29, "Fear", 31.0
 
 @st.cache_data(ttl=7200, show_spinner=False)
 def get_fred_data(api_key):
@@ -172,7 +172,7 @@ p_xrp = live_prices["XRP-USD"]
 p_cvx = live_prices["CVX-USD"]
 
 # 1. Técnico BTC (RSI y EMA 200)
-rsi, ema_bot, ema_top, dist_ema, score_r, score_e = 34.4, 76447.0, 77500.0, 1.0, 8, 6
+rsi, ema_bot, ema_top, dist_ema, score_r, score_e = 36.3, 76352.0, 77500.0, -2.0, 8, 4
 try:
     hist = get_btc_history()
     if not hist.empty and len(hist) >= 200:
@@ -204,17 +204,38 @@ try:
         else:
             score_r = 1
             
-        # E - EMA 200
-        if dist_ema <= 0:
+        # E - EMA 200 CON CRITERIO TÉCNICO DE SOPORTE / RUPTURA:
+        # - Rebotando sobre soporte (0% a +4%): compra óptima con riesgo controlado (9/10)
+        # - Consolidación normal (+4% a +8%): neutro a bueno (6/10)
+        # - Sobreextendido (> +8%): no comprar con FOMO (3/10)
+        # - Perforación hacia abajo (-1% a -4%): precaución, media perdida (4/10)
+        # - Pérdida severa (< -4%): estructura rota / peligro bajista (2/10)
+        if 0.0 <= dist_ema <= 4.0:
             score_e = 9
-        elif dist_ema <= 3:
+            e_status_txt = "EN SOPORTE"
+            e_needle_col = "#00F7A5"
+        elif 4.0 < dist_ema <= 8.0:
             score_e = 6
-        elif dist_ema <= 10:
-            score_e = 4
-        else:
+            e_status_txt = "CONSOLIDACIÓN"
+            e_needle_col = "#FFB020"
+        elif dist_ema > 8.0:
             score_e = 3
+            e_status_txt = "EXTENSIÓN"
+            e_needle_col = "#FF4A68"
+        elif -4.0 <= dist_ema < 0.0:
+            score_e = 4
+            e_status_txt = "RUPTURA / PRECAUCIÓN"
+            e_needle_col = "#FFB020"
+        else:
+            score_e = 2
+            e_status_txt = "BAJO EMA 200"
+            e_needle_col = "#FF4A68"
+    else:
+        e_status_txt = "RUPTURA / PRECAUCIÓN"
+        e_needle_col = "#FFB020"
 except Exception:
-    pass
+    e_status_txt = "RUPTURA / PRECAUCIÓN"
+    e_needle_col = "#FFB020"
 
 # 2. Sentimiento Fear & Greed
 fg_val, fg_text, fg_7d_avg = get_fear_and_greed()
@@ -236,18 +257,15 @@ else:
 # 3. Macro FRED: Liquidez y Reservas
 score_l = 8
 gli_desc = "Liquidez P23 (var 13w vs 1a) | acumular"
-res_actual = 2.89e6
+res_actual = 2.93e6
 modo_qe = False
 score_m = 4
 
 try:
     wresbal_series, walcl, ecb = get_fred_data(API_KEY)
-    
-    # L - Liquidez Global: Acumulación estructural (P23 a P35 = 8/10)
     score_l = 8
     gli_desc = "Liquidez P23 (var 13w vs 1a) | acumular"
 
-    # M - Reservas Bancarias Fed (WRESBAL)
     if not wresbal_series.empty and len(wresbal_series) >= 14:
         res_actual = float(wresbal_series.iloc[-1])
         res_sma = float(wresbal_series.rolling(14).mean().iloc[-1])
@@ -257,8 +275,8 @@ except Exception:
     pass
 
 # 4. D - Dollar Index DXY
-dxy_val = 101.9
-dxy_1m_change = -0.05
+dxy_val = 101.8
+dxy_1m_change = -0.73
 score_d = 9
 
 try:
@@ -293,18 +311,16 @@ raw_score = (
 
 total_score = round(raw_score)
 
-# Umbral calibrado institucional: >= 60 activa compra
 if total_score >= 60:
     status_label = "ZONA DE COMPRA / SUELO DETECTADO"
-    status_col = "#00F7A5"  # Verde brillante
+    status_col = "#00F7A5"
 elif total_score >= 45:
     status_label = "ZONA NEUTRAL / MANTENER (HOLD)"
-    status_col = "#FFB020"  # Ámbar
+    status_col = "#FFB020"
 else:
     status_label = "SOBREEXTENDIDO / NO ENTRAR CON FOMO"
-    status_col = "#FF4A68"  # Rojo
+    status_col = "#FF4A68"
 
-# Bloques de precio fijos y visibles
 if precio_btc < 77500:
     rango_txt = "Rango $58k - $77.5k (Suelo / Acumulación)"
 elif precio_btc < 96000:
@@ -419,9 +435,10 @@ with col_top_gauges:
             </div>""", unsafe_allow_html=True)
         
     with g3:
-        e_needle_col = "#00F7A5" if dist_ema <= 3 else ("#FFB020" if dist_ema <= 8 else "#FF4A68")
-        e_status_txt = "EN SOPORTE" if dist_ema <= 3 else "EXTENSIÓN"
-        e_gauge = render_semi_gauge(f"{'+' if dist_ema>=0 else ''}{int(round(dist_ema))}%", min(max(dist_ema * 4, 10), 100), e_status_txt, e_needle_col)
+        # Posición de la aguja: 50% es la media exacta (0%)
+        # > 0% mueve a la derecha (verde), < 0% mueve a la izquierda (amarillo/rojo)
+        needle_pos = max(10.0, min(90.0, 50.0 + (dist_ema * 4.0)))
+        e_gauge = render_semi_gauge(f"{'+' if dist_ema>=0 else ''}{int(round(dist_ema))}%", needle_pos, e_status_txt, e_needle_col)
         e_col = color_by_score(score_e)
         st.markdown(f"""<div class="card-box" style="text-align: center;">
                 <div class="card-title" style="justify-content: center;">● E - EMA 200D</div>
