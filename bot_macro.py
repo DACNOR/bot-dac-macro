@@ -1,27 +1,3 @@
-Ahora sí te entiendo perfectamente. Lo que tú quieres es **separar el color visual del tacómetro (que representa la dirección del precio respecto a la media)** del **puntaje numérico de compra (que es contracíclico, igual que en el Fear & Greed y el RSI)**.
-
-Fíjate en la simetría perfecta que acabas de plantear:
-
-* En **Fear & Greed**, el número bajo (`20`) es **Pánico** (mercado hundido), pero te da **8/10 o 10/10** en Puntaje de Compra.
-* En **RSI**, el número bajo (`26`) es **Sobreventa** (precio castigado), pero te da **9/10** en Puntaje de Compra.
-* Pues en la **EMA 200D**, quieres exactamente la misma lógica:
-1. **Por debajo de `-4%` (ej. `-10%`):** El precio está hundido por debajo de la media ➔ Se pinta en **🔴 ROJO** (porque la media está perforada a la baja: `BAJO EMA 200`), **PERO** como es descuento barato para acumular, su puntaje numérico es alto: **`8/10` o `9/10**`.
-2. **Zona central (`-4%` a `+3%`):** El precio está peleando la media ➔ Se pinta en **🟡 AMARILLO** (`TESTEO EMA 200`), con puntaje neutro: **`6/10`** *(exactamente igual que Nacho ayer con su `-3.5%` en amarillo `6/10`)*.
-3. **Por encima de `+3%` (impulso alcista o ciclo subiendo hacia 300k):** El precio está por encima de la media en tendencia alcista ➔ Se pinta en **🟢 VERDE** (`TENDENCIA ALCISTA`), **PERO** como ya está caro/alejado para meter dinero nuevo, su puntaje de compra baja a **`3/10` o `4/10**`.
-
-
-
-Esa regla resuelve de un plumazo toda la confusión visual: **Rojo = bajo la media (barato, puntaje alto)**, **Amarillo = en la media (neutro, 6/10)**, y **Verde = sobre la media (alcista, puntaje bajo para no comprar caro)**.
-
----
-
-### Código actualizado con tu regla exacta en `bot_macro.py`
-
-1. Entra en GitHub a `bot_macro.py` y pulsa el **lápiz**.
-2. Selecciona **todo (Ctrl + A)** y **bórralo** para dejar el archivo completamente en blanco.
-3. Pega este bloque y haz clic en **Commit changes...**.
-
-```python
 import streamlit as st
 import requests
 import pandas as pd
@@ -493,5 +469,4 @@ with m3:
             <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{m_col};"></div></div>
             <div class="card-sub" style="text-align: left;">Régimen Fed: <b>{qe_label}</b> (${res_actual/1e6:.2f}T)</div>
         </div>""", unsafe_allow_html=True)
-
-```
+    
