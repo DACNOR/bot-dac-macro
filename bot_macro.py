@@ -1,3 +1,27 @@
+Ahora sí te entiendo perfectamente. Lo que tú quieres es **separar el color visual del tacómetro (que representa la dirección del precio respecto a la media)** del **puntaje numérico de compra (que es contracíclico, igual que en el Fear & Greed y el RSI)**.
+
+Fíjate en la simetría perfecta que acabas de plantear:
+
+* En **Fear & Greed**, el número bajo (`20`) es **Pánico** (mercado hundido), pero te da **8/10 o 10/10** en Puntaje de Compra.
+* En **RSI**, el número bajo (`26`) es **Sobreventa** (precio castigado), pero te da **9/10** en Puntaje de Compra.
+* Pues en la **EMA 200D**, quieres exactamente la misma lógica:
+1. **Por debajo de `-4%` (ej. `-10%`):** El precio está hundido por debajo de la media ➔ Se pinta en **🔴 ROJO** (porque la media está perforada a la baja: `BAJO EMA 200`), **PERO** como es descuento barato para acumular, su puntaje numérico es alto: **`8/10` o `9/10**`.
+2. **Zona central (`-4%` a `+3%`):** El precio está peleando la media ➔ Se pinta en **🟡 AMARILLO** (`TESTEO EMA 200`), con puntaje neutro: **`6/10`** *(exactamente igual que Nacho ayer con su `-3.5%` en amarillo `6/10`)*.
+3. **Por encima de `+3%` (impulso alcista o ciclo subiendo hacia 300k):** El precio está por encima de la media en tendencia alcista ➔ Se pinta en **🟢 VERDE** (`TENDENCIA ALCISTA`), **PERO** como ya está caro/alejado para meter dinero nuevo, su puntaje de compra baja a **`3/10` o `4/10**`.
+
+
+
+Esa regla resuelve de un plumazo toda la confusión visual: **Rojo = bajo la media (barato, puntaje alto)**, **Amarillo = en la media (neutro, 6/10)**, y **Verde = sobre la media (alcista, puntaje bajo para no comprar caro)**.
+
+---
+
+### Código actualizado con tu regla exacta en `bot_macro.py`
+
+1. Entra en GitHub a `bot_macro.py` y pulsa el **lápiz**.
+2. Selecciona **todo (Ctrl + A)** y **bórralo** para dejar el archivo completamente en blanco.
+3. Pega este bloque y haz clic en **Commit changes...**.
+
+```python
 import streamlit as st
 import requests
 import pandas as pd
@@ -94,7 +118,7 @@ API_KEY = "90d75f0fd9f03982f65ae802c71aad75"
 @st.cache_data(ttl=60, show_spinner=False)
 def get_live_prices():
     tickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "CVX-USD"]
-    precios = {"BTC-USD": 68850.0, "ETH-USD": 1930.0, "SOL-USD": 78.0, "XRP-USD": 1.00, "CVX-USD": 1.59}
+    precios = {"BTC-USD": 68740.0, "ETH-USD": 1930.0, "SOL-USD": 78.2, "XRP-USD": 1.00, "CVX-USD": 1.59}
     try:
         df = yf.download(tickers, period="1d", interval="1m", progress=False)
         if not df.empty:
@@ -158,7 +182,7 @@ def get_dxy_data():
     return pd.DataFrame()
 
 # ==========================================
-# CÁLCULOS CUANTITATIVOS (OPCIÓN A - FRELDI PURO)
+# CÁLCULOS CUANTITATIVOS
 # ==========================================
 
 live_prices = get_live_prices()
@@ -169,8 +193,10 @@ p_xrp = live_prices["XRP-USD"]
 p_cvx = live_prices["CVX-USD"]
 
 # 1. Técnico BTC (RSI y EMA 200)
-rsi, ema_bot, dist_ema, score_r, score_e = 26.1, 76103.0, -9.5, 9, 8
-e_status_txt = "DESCUENTO PROFUNDO"
+rsi, ema_bot, dist_ema, score_r, score_e = 26.1, 76103.0, -9.7, 9, 8
+e_status_txt = "BAJO EMA 200"
+e_visual_col = "#FF4A68"
+e_needle_pct = 15.0
 
 try:
     hist = get_btc_history()
@@ -187,7 +213,7 @@ try:
         loss = (-diff.clip(upper=0)).ewm(com=13, adjust=False).mean()
         rsi = float((100 - (100 / (1 + (gain / loss)))).iloc[-1])
         
-        # R - RSI Diario (Calibrado exacto Nacho: <=20 es 10/10; 21-28 es 9/10; 29-38 es 8/10)
+        # R - RSI Diario
         if rsi <= 20:
             score_r = 10
         elif rsi <= 28:
@@ -203,32 +229,35 @@ try:
         else:
             score_r = 1
             
-        # E - EMA 200 (Contracíclico DCA: bajo EMA = descuento de compra)
-        if dist_ema <= -8.0:
-            score_e = 8
-            e_status_txt = "DESCUENTO PROFUNDO"
-        elif dist_ema <= -2.0:
-            score_e = 6
-            e_status_txt = "ZONA DESCUENTO"
+        # E - EMA 200D (Lógica exacta del usuario):
+        # 1. < -4%: Bajo la EMA -> Color ROJO (#FF4A68), aguja izquierda, Puntaje Compra ALTO (8/10 o 9/10)
+        # 2. -4% a +3%: Zona neutra / testeo -> Color AMARILLO (#FFB020), aguja centro, Puntaje Compra 6/10
+        # 3. > +3%: Tendencia alcista -> Color VERDE (#00F7A5), aguja derecha, Puntaje Compra BAJO (3/10 o 4/10)
+        if dist_ema < -4.0:
+            score_e = 9 if dist_ema <= -12.0 else 8
+            e_status_txt = "BAJO EMA 200"
+            e_visual_col = "#FF4A68"  # Rojo (por debajo de la media)
+            e_needle_pct = max(8.0, 40.0 + (dist_ema * 2.0))
         elif dist_ema <= 3.0:
-            score_e = 5
-            e_status_txt = "EN MEDIA 200D"
-        elif dist_ema <= 10.0:
-            score_e = 4
-            e_status_txt = "EXTENSIÓN LEVE"
+            score_e = 6
+            e_status_txt = "TESTEO EMA 200"
+            e_visual_col = "#FFB020"  # Amarillo (zona media)
+            e_needle_pct = 50.0 + (dist_ema * 3.0)
         else:
-            score_e = 2
-            e_status_txt = "SOBREEXTENDIDO"
+            score_e = 4 if dist_ema <= 15.0 else 3
+            e_status_txt = "TENDENCIA ALCISTA"
+            e_visual_col = "#00F7A5"  # Verde (por encima de la media)
+            e_needle_pct = min(92.0, 65.0 + (dist_ema * 1.5))
 except Exception:
     pass
 
-# 2. Sentimiento Fear & Greed (Fórmula lineal exacta: round((100 - FG) / 10))
+# 2. Sentimiento Fear & Greed (Fórmula lineal exacta: <=24 es >=8/10 verde; 25-34 es 7/10 amarillo)
 fg_val, fg_text, fg_7d_avg = get_fear_and_greed()
 score_f = max(1, min(10, round((100 - fg_val) / 10)))
 
 # 3. Macro FRED: Liquidez Dinámica Real (Percentil Ranking) y Reservas
-score_l = 9
-gli_desc = "Liquidez P8 (var 13w vs 1a) | acumular"
+score_l = 8
+gli_desc = "Liquidez P35 (var 13w vs 1a) | acumular"
 res_actual = 2.96e6
 modo_qe = True
 score_m = 8
@@ -272,9 +301,9 @@ except Exception:
     pass
 
 # 4. D - Dollar Index DXY
-dxy_val = 102.8
-dxy_1m_change = 0.50
-score_d = 9
+dxy_val = 103.1
+dxy_1m_change = 1.13
+score_d = 10
 
 try:
     dxy_df = get_dxy_data()
@@ -297,7 +326,7 @@ except Exception:
     pass
 
 # ==========================================
-# ÍNDICE CONFLUENCIA FRELDI TOTAL (0 - 100)
+# ÍNDICE CONFLUENCIA TOTAL (0 - 100)
 # ==========================================
 raw_score = (
     (score_f * 0.18) +
@@ -336,7 +365,7 @@ def color_by_score(val):
     return "#FF4A68"
 
 # ==========================================
-# GENERADOR VISUAL: TACÓMETRO COHERENTE
+# GENERADOR VISUAL: TACÓMETRO
 # ==========================================
 def render_semi_gauge(display_value, needle_pct, label_bottom, custom_color=None):
     pct = max(0.0, min(100.0, float(needle_pct)))
@@ -425,12 +454,12 @@ with col_top_gauges:
             </div>""", unsafe_allow_html=True)
         
     with g3:
-        e_col = color_by_score(score_e)
-        e_gauge = render_semi_gauge(f"{'+' if dist_ema>=0 else ''}{int(round(dist_ema))}%", score_e * 10, e_status_txt, e_col)
+        e_score_col = color_by_score(score_e)
+        e_gauge = render_semi_gauge(f"{'+' if dist_ema>=0 else ''}{int(round(dist_ema))}%", e_needle_pct, e_status_txt, e_visual_col)
         st.markdown(f"""<div class="card-box" style="text-align: center;">
                 <div class="card-title" style="justify-content: center;">● E - EMA 200D</div>
                 {e_gauge}
-                <div class="card-sub">Puntaje Compra: <b style="color:{e_col};">{score_e}/10</b> | <b>${ema_bot:,.0f}</b></div>
+                <div class="card-sub">Puntaje Compra: <b style="color:{e_score_col};">{score_e}/10</b> | <b>${ema_bot:,.0f}</b></div>
             </div>""", unsafe_allow_html=True)
 
 st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
@@ -464,3 +493,5 @@ with m3:
             <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{m_col};"></div></div>
             <div class="card-sub" style="text-align: left;">Régimen Fed: <b>{qe_label}</b> (${res_actual/1e6:.2f}T)</div>
         </div>""", unsafe_allow_html=True)
+
+```
