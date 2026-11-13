@@ -94,7 +94,7 @@ API_KEY = "90d75f0fd9f03982f65ae802c71aad75"
 @st.cache_data(ttl=60, show_spinner=False)
 def get_live_prices():
     tickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "CVX-USD"]
-    precios = {"BTC-USD": 68740.0, "ETH-USD": 1930.0, "SOL-USD": 78.2, "XRP-USD": 1.00, "CVX-USD": 1.59}
+    precios = {"BTC-USD": 68750.0, "ETH-USD": 1936.0, "SOL-USD": 80.0, "XRP-USD": 1.02, "CVX-USD": 1.61}
     try:
         df = yf.download(tickers, period="1d", interval="1m", progress=False)
         if not df.empty:
@@ -135,19 +135,38 @@ def get_fear_and_greed():
     return 20, "Extreme Fear", 27.0
 
 @st.cache_data(ttl=7200, show_spinner=False)
-def get_fred_data(api_key):
+def get_fred_global_liquidity(api_key):
+    """
+    Descarga los componentes del Global Liquidity Index (TradingView):
+    FED (WALCL) - TGA (WTREGEN) - RRP (RRPONTSYD) + ECB + BOJ + PBC + Otros (SNB/BOE/BOC) en USD.
+    """
+    series_ids = {
+        'wresbal': 'WRESBAL',         # Reservas Bancarias Fed (Millones USD)
+        'fed': 'WALCL',               # Balance Fed (Millones USD)
+        'tga': 'WTREGEN',             # Treasury General Account (Millones USD)
+        'rrp': 'RRPONTSYD',           # Reverse Repo (Miles de Millones USD -> * 1000)
+        'ecb': 'ECBASSETSW',          # Balance BCE (Millones EUR)
+        'eurusd': 'DEXUSEU',          # EUR/USD
+        'boj': 'JPNASSETS',           # Balance BOJ (100 Millones JPY -> * 100)
+        'usdjpy': 'DEXJPUS',          # USD/JPY
+        'pbc': 'TRESEGCNM052N',       # Reservas/Liquidez China (Millones USD)
+        'snb': 'SNBASSETSW',          # Banco Nacional Suiza (Millones CHF)
+        'usdchf': 'DEXSZUS',          # USD/CHF
+        'boe': 'UKASSETS'             # Banco de Inglaterra (si disponible)
+    }
+    data = {}
     try:
         fred = Fred(api_key=api_key)
-        wresbal = fred.get_series('WRESBAL')
-        walcl = fred.get_series('WALCL')
-        ecb = fred.get_series('ECBASSETSW')
-        eurusd = fred.get_series('DEXUSEU')
-        return (wresbal.dropna() if wresbal is not None else pd.Series(dtype=float),
-                walcl.dropna() if walcl is not None else pd.Series(dtype=float),
-                ecb.dropna() if ecb is not None else pd.Series(dtype=float),
-                eurusd.dropna() if eurusd is not None else pd.Series(dtype=float))
+        for key, code in series_ids.items():
+            try:
+                s = fred.get_series(code)
+                if s is not None and not s.dropna().empty:
+                    data[key] = s.dropna()
+            except Exception:
+                pass
     except Exception:
-        return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
+        pass
+    return data
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_dxy_data():
@@ -171,7 +190,7 @@ p_xrp = live_prices["XRP-USD"]
 p_cvx = live_prices["CVX-USD"]
 
 # 1. Técnico BTC (RSI y EMA 200)
-rsi, ema_bot, dist_ema, score_r, score_e = 26.1, 76103.0, -9.7, 9, 8
+rsi, ema_bot, dist_ema, score_r, score_e = 25.7, 76054.0, -9.6, 9, 8
 e_status_txt = "BAJO EMA 200"
 e_visual_col = "#FF4A68"
 e_needle_pct = 15.0
@@ -230,7 +249,7 @@ except Exception:
 fg_val, fg_text, fg_7d_avg = get_fear_and_greed()
 score_f = max(1, min(10, round((100 - fg_val) / 10)))
 
-# 3. Macro FRED: Liquidez Global en Dólares ($) y Reservas
+# 3. Macro FRED: Global Liquidity Index Completo (FED - TGA - RRP + ECB + BOJ + PBC + Otros)
 score_l = 9
 gli_desc = "Liquidez P9 (var 13w vs 1a) | acumular"
 res_actual = 2.96e6
@@ -238,19 +257,48 @@ modo_qe = True
 score_m = 8
 
 try:
-    wresbal_series, walcl, ecb, eurusd = get_fred_data(API_KEY)
+    fred_data = get_fred_global_liquidity(API_KEY)
     
-    # L - Liquidez Global Dinámica homogeneizada en Dólares ($)
-    if len(walcl) > 20 and len(ecb) > 20 and len(eurusd) > 20:
-        w_weekly = walcl.resample('W-WED').last().ffill()
-        e_weekly = ecb.resample('W-WED').last().ffill()
-        fx_weekly = eurusd.resample('W-WED').last().ffill()
+    # Construir dataframe semanal alineado (miércoles)
+    if 'fed' in fred_data and 'ecb' in fred_data:
+        df_weekly = pd.DataFrame()
+        for k, s in fred_data.items():
+            df_weekly[k] = s.resample('W-WED').last()
         
-        gli_df = pd.DataFrame({'fed': w_weekly, 'ecb': e_weekly, 'fx': fx_weekly}).ffill().dropna()
+        df_weekly = df_weekly.ffill().dropna(subset=['fed', 'ecb'])
         
-        if len(gli_df) >= 65:
-            gli_total_usd = gli_df['fed'] + (gli_df['ecb'] * gli_df['fx'])
-            var_13w = gli_total_usd.pct_change(13).dropna()
+        if len(df_weekly) >= 65:
+            # 1. Liquidez Neta Fed (Millones USD)
+            fed_net = df_weekly['fed'].copy()
+            if 'tga' in df_weekly.columns:
+                fed_net = fed_net - df_weekly['tga'].fillna(0)
+            if 'rrp' in df_weekly.columns:
+                # RRP viene en Billions (Miles de Millones), pasamos a Millones (* 1000)
+                fed_net = fed_net - (df_weekly['rrp'].fillna(0) * 1000.0)
+            
+            # 2. BCE en Millones USD
+            fx_eur = df_weekly['eurusd'] if 'eurusd' in df_weekly.columns else 1.08
+            ecb_usd = df_weekly['ecb'] * fx_eur
+            
+            # 3. BOJ en Millones USD (JPNASSETS en 100 Millones JPY -> * 100 / USDJPY)
+            boj_usd = 0.0
+            if 'boj' in df_weekly.columns and 'usdjpy' in df_weekly.columns:
+                boj_usd = (df_weekly['boj'].fillna(0) * 100.0) / df_weekly['usdjpy'].replace(0, 150.0)
+                
+            # 4. PBC (China) en Millones USD
+            pbc_usd = 0.0
+            if 'pbc' in df_weekly.columns:
+                pbc_usd = df_weekly['pbc'].fillna(0)
+                
+            # 5. Otros Bancos Centrales (Suiza SNB en Millones USD)
+            otros_usd = 0.0
+            if 'snb' in df_weekly.columns and 'usdchf' in df_weekly.columns:
+                otros_usd = df_weekly['snb'].fillna(0) / df_weekly['usdchf'].replace(0, 0.88)
+                
+            # Suma Total Global Liquidity Index en USD
+            gli_global_usd = fed_net + ecb_usd + boj_usd + pbc_usd + otros_usd
+            
+            var_13w = gli_global_usd.pct_change(13).dropna()
             ventana_1a = var_13w.iloc[-52:]
             p_val = int(round(ventana_1a.rank(pct=True).iloc[-1] * 100))
             
@@ -269,7 +317,8 @@ try:
             gli_desc = f"Liquidez P{p_val} (var 13w vs 1a) | {gli_status}"
 
     # M - Reservas Bancarias Fed (WRESBAL)
-    if len(wresbal_series) >= 14:
+    if 'wresbal' in fred_data and len(fred_data['wresbal']) >= 14:
+        wresbal_series = fred_data['wresbal']
         res_actual = float(wresbal_series.iloc[-1])
         res_sma = float(wresbal_series.rolling(14).mean().iloc[-1])
         modo_qe = res_actual > res_sma
@@ -278,8 +327,8 @@ except Exception:
     pass
 
 # 4. D - Dollar Index DXY
-dxy_val = 103.2
-dxy_1m_change = 1.36
+dxy_val = 103.4
+dxy_1m_change = 1.53
 score_d = 10
 
 try:
