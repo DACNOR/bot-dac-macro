@@ -94,7 +94,7 @@ API_KEY = "90d75f0fd9f03982f65ae802c71aad75"
 @st.cache_data(ttl=60, show_spinner=False)
 def get_live_prices():
     tickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "CVX-USD"]
-    precios = {"BTC-USD": 68830.0, "ETH-USD": 1938.0, "SOL-USD": 80.1, "XRP-USD": 1.02, "CVX-USD": 1.61}
+    precios = {"BTC-USD": 68830.0, "ETH-USD": 1938.0, "SOL-USD": 80.0, "XRP-USD": 1.02, "CVX-USD": 1.61}
     try:
         df = yf.download(tickers, period="1d", interval="1m", progress=False)
         if not df.empty:
@@ -136,10 +136,6 @@ def get_fear_and_greed():
 
 @st.cache_data(ttl=7200, show_spinner=False)
 def get_fred_global_liquidity(api_key):
-    """
-    Series semanales puras en FRED para Liquidez Global en USD:
-    (WALCL - WTREGEN - RRPONTSYD) + (ECBASSETSW * DEXUSEU)
-    """
     series_ids = {
         'wresbal': 'WRESBAL',     # Reservas Bancarias Fed (Millones USD)
         'fed': 'WALCL',           # Balance Fed (Millones USD)
@@ -184,7 +180,7 @@ p_xrp = live_prices["XRP-USD"]
 p_cvx = live_prices["CVX-USD"]
 
 # 1. Técnico BTC (RSI y EMA 200)
-rsi, ema_bot, dist_ema, score_r, score_e = 25.7, 76054.0, -9.5, 9, 8
+rsi, ema_bot, dist_ema, score_r, score_e = 25.9, 76056.0, -9.5, 9, 8
 e_status_txt = "BAJO EMA 200"
 e_visual_col = "#FF4A68"
 e_needle_pct = 15.0
@@ -244,8 +240,8 @@ fg_val, fg_text, fg_7d_avg = get_fear_and_greed()
 score_f = max(1, min(10, round((100 - fg_val) / 10)))
 
 # 3. Macro FRED: Liquidez Neta Fed (WALCL - TGA - RRP) + BCE en USD
-score_l = 9
-gli_desc = "Liquidez P10 (var 13w vs 1a) | acumular"
+score_l = 6
+gli_desc = "P44 | Liquidez media (Transición)"
 res_actual = 2.96e6
 modo_qe = True
 score_m = 8
@@ -261,18 +257,15 @@ try:
         df_weekly = df_weekly.ffill().dropna(subset=['fed', 'ecb'])
         
         if len(df_weekly) >= 65:
-            # Liquidez Neta Fed en Millones USD
             fed_net = df_weekly['fed'].copy()
             if 'tga' in df_weekly.columns:
                 fed_net = fed_net - df_weekly['tga'].fillna(0)
             if 'rrp' in df_weekly.columns:
                 fed_net = fed_net - (df_weekly['rrp'].fillna(0) * 1000.0)
             
-            # BCE en Millones USD
             fx_eur = df_weekly['eurusd'] if 'eurusd' in df_weekly.columns else 1.08
             ecb_usd = df_weekly['ecb'] * fx_eur
             
-            # Liquidez Global Neta Semanal en USD
             gli_net_usd = fed_net + ecb_usd
             
             var_13w = gli_net_usd.pct_change(13).dropna()
@@ -281,17 +274,17 @@ try:
             
             if p_val <= 20:
                 score_l = 9
-                gli_status = "acumular"
+                gli_status = "Sequía de liquidez (Suelo / Comprar)"
             elif p_val <= 35:
                 score_l = 8
-                gli_status = "acumular"
+                gli_status = "Sequía de liquidez (Acumular)"
             elif p_val <= 60:
                 score_l = 6
-                gli_status = "neutral"
+                gli_status = "Liquidez media (Transición)"
             else:
                 score_l = 4
-                gli_status = "expansión"
-            gli_desc = f"Liquidez P{p_val} (var 13w vs 1a) | {gli_status}"
+                gli_status = "Exceso de liquidez (Techo / No FOMO)"
+            gli_desc = f"P{p_val} | {gli_status}"
 
     # M - Reservas Bancarias Fed (WRESBAL)
     if 'wresbal' in fred_data and len(fred_data['wresbal']) >= 14:
