@@ -141,11 +141,13 @@ def get_fred_data(api_key):
         wresbal = fred.get_series('WRESBAL')
         walcl = fred.get_series('WALCL')
         ecb = fred.get_series('ECBASSETSW')
+        eurusd = fred.get_series('DEXUSEU')
         return (wresbal.dropna() if wresbal is not None else pd.Series(dtype=float),
                 walcl.dropna() if walcl is not None else pd.Series(dtype=float),
-                ecb.dropna() if ecb is not None else pd.Series(dtype=float))
+                ecb.dropna() if ecb is not None else pd.Series(dtype=float),
+                eurusd.dropna() if eurusd is not None else pd.Series(dtype=float))
     except Exception:
-        return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
+        return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_dxy_data():
@@ -205,51 +207,50 @@ try:
         else:
             score_r = 1
             
-        # E - EMA 200D (Lógica exacta del usuario):
-        # 1. < -4%: Bajo la EMA -> Color ROJO (#FF4A68), aguja izquierda, Puntaje Compra ALTO (8/10 o 9/10)
-        # 2. -4% a +3%: Zona neutra / testeo -> Color AMARILLO (#FFB020), aguja centro, Puntaje Compra 6/10
-        # 3. > +3%: Tendencia alcista -> Color VERDE (#00F7A5), aguja derecha, Puntaje Compra BAJO (3/10 o 4/10)
+        # E - EMA 200D
         if dist_ema < -4.0:
             score_e = 9 if dist_ema <= -12.0 else 8
             e_status_txt = "BAJO EMA 200"
-            e_visual_col = "#FF4A68"  # Rojo (por debajo de la media)
+            e_visual_col = "#FF4A68"
             e_needle_pct = max(8.0, 40.0 + (dist_ema * 2.0))
         elif dist_ema <= 3.0:
             score_e = 6
             e_status_txt = "TESTEO EMA 200"
-            e_visual_col = "#FFB020"  # Amarillo (zona media)
+            e_visual_col = "#FFB020"
             e_needle_pct = 50.0 + (dist_ema * 3.0)
         else:
             score_e = 4 if dist_ema <= 15.0 else 3
             e_status_txt = "TENDENCIA ALCISTA"
-            e_visual_col = "#00F7A5"  # Verde (por encima de la media)
+            e_visual_col = "#00F7A5"
             e_needle_pct = min(92.0, 65.0 + (dist_ema * 1.5))
 except Exception:
     pass
 
-# 2. Sentimiento Fear & Greed (Fórmula lineal exacta: <=24 es >=8/10 verde; 25-34 es 7/10 amarillo)
+# 2. Sentimiento Fear & Greed
 fg_val, fg_text, fg_7d_avg = get_fear_and_greed()
 score_f = max(1, min(10, round((100 - fg_val) / 10)))
 
-# 3. Macro FRED: Liquidez Dinámica Real (Percentil Ranking) y Reservas
-score_l = 8
-gli_desc = "Liquidez P35 (var 13w vs 1a) | acumular"
+# 3. Macro FRED: Liquidez Global en Dólares ($) y Reservas
+score_l = 9
+gli_desc = "Liquidez P9 (var 13w vs 1a) | acumular"
 res_actual = 2.96e6
 modo_qe = True
 score_m = 8
 
 try:
-    wresbal_series, walcl, ecb = get_fred_data(API_KEY)
+    wresbal_series, walcl, ecb, eurusd = get_fred_data(API_KEY)
     
-    # L - Liquidez Global Dinámica
-    if len(walcl) > 20 and len(ecb) > 20:
+    # L - Liquidez Global Dinámica homogeneizada en Dólares ($)
+    if len(walcl) > 20 and len(ecb) > 20 and len(eurusd) > 20:
         w_weekly = walcl.resample('W-WED').last().ffill()
         e_weekly = ecb.resample('W-WED').last().ffill()
-        gli_df = pd.DataFrame({'fed': w_weekly, 'ecb': e_weekly}).ffill().dropna()
+        fx_weekly = eurusd.resample('W-WED').last().ffill()
+        
+        gli_df = pd.DataFrame({'fed': w_weekly, 'ecb': e_weekly, 'fx': fx_weekly}).ffill().dropna()
         
         if len(gli_df) >= 65:
-            gli_total = gli_df['fed'] + gli_df['ecb']
-            var_13w = gli_total.pct_change(13).dropna()
+            gli_total_usd = gli_df['fed'] + (gli_df['ecb'] * gli_df['fx'])
+            var_13w = gli_total_usd.pct_change(13).dropna()
             ventana_1a = var_13w.iloc[-52:]
             p_val = int(round(ventana_1a.rank(pct=True).iloc[-1] * 100))
             
@@ -277,8 +278,8 @@ except Exception:
     pass
 
 # 4. D - Dollar Index DXY
-dxy_val = 103.1
-dxy_1m_change = 1.13
+dxy_val = 103.2
+dxy_1m_change = 1.36
 score_d = 10
 
 try:
@@ -469,4 +470,3 @@ with m3:
             <div class="comp-bar-bg"><div class="comp-bar-fill" style="width:{score_m*10}%; background-color:{m_col};"></div></div>
             <div class="card-sub" style="text-align: left;">Régimen Fed: <b>{qe_label}</b> (${res_actual/1e6:.2f}T)</div>
         </div>""", unsafe_allow_html=True)
-    
