@@ -94,7 +94,7 @@ API_KEY = "90d75f0fd9f03982f65ae802c71aad75"
 @st.cache_data(ttl=60, show_spinner=False)
 def get_live_prices():
     tickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "CVX-USD"]
-    precios = {"BTC-USD": 64551.0, "ETH-USD": 1798.0, "SOL-USD": 70.85, "XRP-USD": 0.9608, "CVX-USD": 1.44}
+    precios = {"BTC-USD": 64490.73, "ETH-USD": 1796.29, "SOL-USD": 70.69, "XRP-USD": 0.9587, "CVX-USD": 1.44}
     try:
         df = yf.download(tickers, period="1d", interval="1m", progress=False)
         if not df.empty:
@@ -137,9 +137,9 @@ def get_fear_and_greed():
 @st.cache_data(ttl=7200, show_spinner=False)
 def get_fred_global_liquidity(api_key):
     series_ids = {
-        'wresbal': 'WRESBAL',         # Reservas Bancarias Fed (Millones USD)
+        'wresbal': 'WRESBAL',         # Reservas Bancarias Fed (Millones USD o Miles de Millones)
         'fed': 'WALCL',               # Balance Fed (Millones USD)
-        'tga': 'WTREGEN',             # Treasury General Account (Millones USD)
+        'tga': 'WTREGEN',             # Treasury General Account (Miles de Millones USD -> * 1000)
         'rrp': 'RRPONTSYD',           # Reverse Repo (Miles de Millones USD -> * 1000)
         'ecb': 'ECBASSETSW',          # Balance BCE (Millones EUR)
         'boj': 'JPNASSETS',           # Balance BoJ (100 Millones JPY)
@@ -242,9 +242,9 @@ except Exception:
 fg_val, fg_text, fg_7d_avg = get_fear_and_greed()
 score_f = max(1, min(10, round((100 - fg_val) / 10)))
 
-# 3. Macro FRED: Liquidez Híbrida (EEUU Táctica + Global Liquidity Bancos Centrales)
+# 3. Macro FRED: Liquidez Híbrida (EEUU Neta Táctica + Global Liquidity Bancos Centrales)
 score_l = 8
-gli_desc = "EEUU: P12 | GLI: P42 ($28.4T) | Sequía (Acumular)"
+gli_desc = "EEUU: P10 | GLI: P35 ($28.0T) | Sequía (Acumular)"
 res_actual = 2.96e6
 modo_qe = True
 score_m = 8
@@ -254,9 +254,9 @@ def percentile_to_score(p):
         return 9
     elif p <= 35:
         return 8
-    elif p <= 65:
+    elif p <= 60:
         return 6
-    elif p <= 80:
+    elif p <= 75:
         return 4
     else:
         return 2
@@ -272,19 +272,29 @@ try:
         df_weekly = df_weekly.ffill().dropna(subset=['fed'])
         
         if len(df_weekly) >= 65:
-            # A) Liquidez Neta EEUU (WALCL - TGA - RRP) en Millones USD
-            fed_net = df_weekly['fed'].copy()
-            if 'tga' in df_weekly.columns:
-                fed_net = fed_net - df_weekly['tga'].fillna(0)
-            if 'rrp' in df_weekly.columns:
-                fed_net = fed_net - (df_weekly['rrp'].fillna(0) * 1000.0)
+            # Normalización de unidades a Millones de USD:
+            # WALCL está en Millones (~6,800,000)
+            # WTREGEN (TGA) y RRPONTSYD (RRP) vienen en Miles de Millones (~800 y ~200) -> multiplicar por 1000
+            fed_millions = df_weekly['fed'].copy()
             
-            # Impulso Táctico EEUU: combinación de flujo mensual (4w) y trimestral (13w) vs 1 año
-            var_us_4w = fed_net.pct_change(4).dropna()
+            if 'tga' in df_weekly.columns:
+                tga_raw = df_weekly['tga'].fillna(0)
+                tga_millions = tga_raw * 1000.0 if float(tga_raw.iloc[-1]) < 20000 else tga_raw
+            else:
+                tga_millions = 0.0
+                
+            if 'rrp' in df_weekly.columns:
+                rrp_raw = df_weekly['rrp'].fillna(0)
+                rrp_millions = rrp_raw * 1000.0 if float(rrp_raw.iloc[-1]) < 20000 else rrp_raw
+            else:
+                rrp_millions = 0.0
+                
+            # A) Liquidez Neta EEUU exacta (WALCL - TGA - RRP en Millones USD)
+            fed_net = fed_millions - tga_millions - rrp_millions
+            
+            # Variación 13 semanas vs 1 año (52 semanas), misma métrica que FRELDI
             var_us_13w = fed_net.pct_change(13).dropna()
-            p_us_4w = var_us_4w.iloc[-52:].rank(pct=True).iloc[-1] * 100
-            p_us_13w = var_us_13w.iloc[-52:].rank(pct=True).iloc[-1] * 100
-            p_eeuu = int(round((p_us_4w * 0.70) + (p_us_13w * 0.30)))
+            p_eeuu = int(round(var_us_13w.iloc[-52:].rank(pct=True).iloc[-1] * 100))
             score_eeuu = percentile_to_score(p_eeuu)
             
             # B) Global Liquidity Index (Fed Neta + BCE + BoJ + PBoC + Otros Bancos Centrales) en Millones USD
@@ -294,7 +304,6 @@ try:
             fx_jpy = df_weekly['jpyusd'].fillna(152.0) if 'jpyusd' in df_weekly.columns else 152.0
             boj_usd = ((df_weekly['boj'].fillna(0) * 100.0) / fx_jpy) if 'boj' in df_weekly.columns else 0.0
             
-            # China PBoC (serie FRED en Millones USD) + Otros Bancos Centrales (BoE, SNB, BoC, RBA ~ 8.8T estructural)
             pboc_usd = df_weekly['pboc'].fillna(3200000.0) if 'pboc' in df_weekly.columns else 3200000.0
             otros_bancos_usd = 8800000.0
             
@@ -305,13 +314,12 @@ try:
             p_gli = int(round(var_gli_13w.iloc[-52:].rank(pct=True).iloc[-1] * 100))
             score_gli = percentile_to_score(p_gli)
             
-            # Confluencia de Liquidez: 65% peso Táctico EEUU + 35% peso Global
-            score_l = int(round((score_eeuu * 0.65) + (score_gli * 0.35)))
+            # Confluencia de Liquidez: 70% peso Táctico EEUU + 30% peso Global
+            score_l = int(round((score_eeuu * 0.70) + (score_gli * 0.30)))
             
-            # Etiqueta coherente con el percentil real
             if p_eeuu <= 25 or score_l >= 8:
                 l_action = "Sequía (Acumular)"
-            elif p_eeuu <= 65 and p_gli <= 65:
+            elif p_eeuu <= 60 and p_gli <= 60:
                 l_action = "Neutra (Transición)"
             else:
                 l_action = "Exceso (No FOMO)"
@@ -321,8 +329,12 @@ try:
     # M - Reservas Bancarias Fed (WRESBAL)
     if 'wresbal' in fred_data and len(fred_data['wresbal']) >= 14:
         wresbal_series = fred_data['wresbal']
-        res_actual = float(wresbal_series.iloc[-1])
+        raw_res = float(wresbal_series.iloc[-1])
+        # Si WRESBAL viene en Miles de Millones (~3,200), pasamos a Millones para mostrar $T correcto
+        res_actual = raw_res * 1000.0 if raw_res < 50000 else raw_res
         res_sma = float(wresbal_series.rolling(14).mean().iloc[-1])
+        if raw_res < 50000:
+            res_sma = res_sma * 1000.0
         modo_qe = res_actual > res_sma
         score_m = 8 if modo_qe else 4
 except Exception:
