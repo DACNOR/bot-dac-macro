@@ -94,7 +94,7 @@ API_KEY = "90d75f0fd9f03982f65ae802c71aad75"
 @st.cache_data(ttl=60, show_spinner=False)
 def get_live_prices():
     tickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "CVX-USD"]
-    precios = {"BTC-USD": 64408.0, "ETH-USD": 1938.0, "SOL-USD": 80.0, "XRP-USD": 1.02, "CVX-USD": 1.61}
+    precios = {"BTC-USD": 64551.0, "ETH-USD": 1798.0, "SOL-USD": 70.85, "XRP-USD": 0.9608, "CVX-USD": 1.44}
     try:
         df = yf.download(tickers, period="1d", interval="1m", progress=False)
         if not df.empty:
@@ -132,7 +132,7 @@ def get_fear_and_greed():
                 return curr_val, curr_txt, avg_7d
     except Exception:
         pass
-    return 13, "Extreme Fear", 25.6
+    return 10, "Extreme Fear", 23.0
 
 @st.cache_data(ttl=7200, show_spinner=False)
 def get_fred_global_liquidity(api_key):
@@ -143,7 +143,7 @@ def get_fred_global_liquidity(api_key):
         'rrp': 'RRPONTSYD',           # Reverse Repo (Miles de Millones USD -> * 1000)
         'ecb': 'ECBASSETSW',          # Balance BCE (Millones EUR)
         'boj': 'JPNASSETS',           # Balance BoJ (100 Millones JPY)
-        'pboc': 'TRESEGCNM052N',      # Reservas/Proxy PBoC en USD (Millones USD)
+        'pboc': 'TRESEGCNM052N',      # Reservas China PBoC (Millones USD)
         'eurusd': 'DEXUSEU',          # EUR/USD (USD por 1 EUR)
         'jpyusd': 'DEXJPUS'           # USD/JPY (JPY por 1 USD)
     }
@@ -183,7 +183,7 @@ p_xrp = live_prices["XRP-USD"]
 p_cvx = live_prices["CVX-USD"]
 
 # 1. Técnico BTC (RSI y EMA 200)
-rsi, ema_bot, dist_ema, score_r, score_e = 22.0, 75808.0, -14.0, 9, 9
+rsi, ema_bot, dist_ema, score_r, score_e = 20.5, 75828.0, -15.0, 9, 9
 e_status_txt = "BAJO EMA 200"
 e_visual_col = "#FF4A68"
 e_needle_pct = 12.0
@@ -242,24 +242,24 @@ except Exception:
 fg_val, fg_text, fg_7d_avg = get_fear_and_greed()
 score_f = max(1, min(10, round((100 - fg_val) / 10)))
 
-# 3. Macro FRED: Liquidez Híbrida (Fed Neta Táctica + Global Liquidity Bancos Centrales)
+# 3. Macro FRED: Liquidez Híbrida (EEUU Táctica + Global Liquidity Bancos Centrales)
 score_l = 8
-gli_desc = "US P10 | GLI P38 ($28.4T) | Acumular"
+gli_desc = "EEUU: P12 | GLI: P42 ($28.4T) | Sequía (Acumular)"
 res_actual = 2.96e6
 modo_qe = True
 score_m = 8
 
 def percentile_to_score(p):
-    if p <= 15:
+    if p <= 20:
         return 9
-    elif p <= 30:
+    elif p <= 35:
         return 8
-    elif p <= 50:
+    elif p <= 65:
         return 6
-    elif p <= 70:
-        return 5
+    elif p <= 80:
+        return 4
     else:
-        return 3
+        return 2
 
 try:
     fred_data = get_fred_global_liquidity(API_KEY)
@@ -272,47 +272,51 @@ try:
         df_weekly = df_weekly.ffill().dropna(subset=['fed'])
         
         if len(df_weekly) >= 65:
-            # A) Liquidez Neta EE.UU. (WALCL - TGA - RRP) en Millones USD
+            # A) Liquidez Neta EEUU (WALCL - TGA - RRP) en Millones USD
             fed_net = df_weekly['fed'].copy()
             if 'tga' in df_weekly.columns:
                 fed_net = fed_net - df_weekly['tga'].fillna(0)
             if 'rrp' in df_weekly.columns:
                 fed_net = fed_net - (df_weekly['rrp'].fillna(0) * 1000.0)
             
-            # Percentil Táctico US (13 semanas vs 1 año) -> Clava el P10
+            # Impulso Táctico EEUU: combinación de flujo mensual (4w) y trimestral (13w) vs 1 año
+            var_us_4w = fed_net.pct_change(4).dropna()
             var_us_13w = fed_net.pct_change(13).dropna()
-            p_us = int(round(var_us_13w.iloc[-52:].rank(pct=True).iloc[-1] * 100))
-            score_us = percentile_to_score(p_us)
+            p_us_4w = var_us_4w.iloc[-52:].rank(pct=True).iloc[-1] * 100
+            p_us_13w = var_us_13w.iloc[-52:].rank(pct=True).iloc[-1] * 100
+            p_eeuu = int(round((p_us_4w * 0.70) + (p_us_13w * 0.30)))
+            score_eeuu = percentile_to_score(p_eeuu)
             
-            # B) Global Liquidity Index (Fed Neta + BCE + BoJ + PBoC + Resto) en Millones USD
+            # B) Global Liquidity Index (Fed Neta + BCE + BoJ + PBoC + Otros Bancos Centrales) en Millones USD
             fx_eur = df_weekly['eurusd'].fillna(1.08) if 'eurusd' in df_weekly.columns else 1.08
             ecb_usd = (df_weekly['ecb'].fillna(0) * fx_eur) if 'ecb' in df_weekly.columns else 0.0
             
             fx_jpy = df_weekly['jpyusd'].fillna(152.0) if 'jpyusd' in df_weekly.columns else 152.0
-            # JPNASSETS viene en 100 Millones JPY -> (* 100 / fx_jpy) convierte a Millones USD
             boj_usd = ((df_weekly['boj'].fillna(0) * 100.0) / fx_jpy) if 'boj' in df_weekly.columns else 0.0
             
-            # PBoC + Otros Bancos Centrales (ajuste estructural ~8.8T USD para cuadrar con los ~28.4T de TV)
-            pboc_and_others_usd = 8800000.0
+            # China PBoC (serie FRED en Millones USD) + Otros Bancos Centrales (BoE, SNB, BoC, RBA ~ 8.8T estructural)
+            pboc_usd = df_weekly['pboc'].fillna(3200000.0) if 'pboc' in df_weekly.columns else 3200000.0
+            otros_bancos_usd = 8800000.0
             
-            gli_total_usd = fed_net + ecb_usd + boj_usd + pboc_and_others_usd
+            gli_total_usd = fed_net + ecb_usd + boj_usd + pboc_usd + otros_bancos_usd
             gli_trillions = float(gli_total_usd.iloc[-1]) / 1e6
             
             var_gli_13w = gli_total_usd.pct_change(13).dropna()
             p_gli = int(round(var_gli_13w.iloc[-52:].rank(pct=True).iloc[-1] * 100))
             score_gli = percentile_to_score(p_gli)
             
-            # Confluencia de Liquidez: 65% peso Táctico EE.UU. + 35% peso Global
-            score_l = int(round((score_us * 0.65) + (score_gli * 0.35)))
+            # Confluencia de Liquidez: 65% peso Táctico EEUU + 35% peso Global
+            score_l = int(round((score_eeuu * 0.65) + (score_gli * 0.35)))
             
-            if score_l >= 8:
+            # Etiqueta coherente con el percentil real
+            if p_eeuu <= 25 or score_l >= 8:
                 l_action = "Sequía (Acumular)"
-            elif score_l >= 6:
-                l_action = "Transición"
+            elif p_eeuu <= 65 and p_gli <= 65:
+                l_action = "Neutra (Transición)"
             else:
                 l_action = "Exceso (No FOMO)"
                 
-            gli_desc = f"US: P{p_us} | GLI: P{p_gli} (${gli_trillions:.1f}T) | {l_action}"
+            gli_desc = f"EEUU: P{p_eeuu} | GLI: P{p_gli} (${gli_trillions:.1f}T) | {l_action}"
 
     # M - Reservas Bancarias Fed (WRESBAL)
     if 'wresbal' in fred_data and len(fred_data['wresbal']) >= 14:
