@@ -134,12 +134,12 @@ def get_fear_and_greed():
         pass
     return 10, "Extreme Fear", 23.0
 
-@st.cache_data(ttl=7200, show_spinner=False)
-def get_fred_global_liquidity(api_key):
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_fred_liquidity_v2(api_key):
     series_ids = {
-        'wresbal': 'WRESBAL',         # Reservas Bancarias Fed (Millones USD o Miles de Millones)
+        'wresbal': 'WRESBAL',         # Reservas Bancarias Fed (Millones USD)
         'fed': 'WALCL',               # Balance Fed (Millones USD)
-        'tga': 'WTREGEN',             # Treasury General Account (Miles de Millones USD -> * 1000)
+        'tga': 'WTREGEN',             # Treasury General Account (Millones USD)
         'rrp': 'RRPONTSYD',           # Reverse Repo (Miles de Millones USD -> * 1000)
         'ecb': 'ECBASSETSW',          # Balance BCE (Millones EUR)
         'boj': 'JPNASSETS',           # Balance BoJ (100 Millones JPY)
@@ -152,7 +152,7 @@ def get_fred_global_liquidity(api_key):
         fred = Fred(api_key=api_key)
         for key, code in series_ids.items():
             try:
-                s = fred.get_series(code)
+                s = fred.get_series(code, observation_start="2023-01-01")
                 if s is not None and not s.dropna().empty:
                     data[key] = s.dropna()
             except Exception:
@@ -242,85 +242,95 @@ except Exception:
 fg_val, fg_text, fg_7d_avg = get_fear_and_greed()
 score_f = max(1, min(10, round((100 - fg_val) / 10)))
 
-# 3. Macro FRED: Liquidez Híbrida (EEUU Neta Táctica + Global Liquidity Bancos Centrales)
-score_l = 8
-gli_desc = "EEUU: P10 | GLI: P35 ($28.0T) | Sequía (Acumular)"
+# 3. Macro FRED: Liquidez Diaria Exacta (91 días vs 365 días)
+score_l = 9
+gli_desc = "EEUU: P10 | GLI: P24 ($28.4T) | Sequía (Acumular)"
 res_actual = 2.96e6
 modo_qe = True
 score_m = 8
 
 def percentile_to_score(p):
-    if p <= 20:
+    if p <= 15:
         return 9
     elif p <= 35:
         return 8
-    elif p <= 60:
-        return 6
+    elif p <= 55:
+        return 7
     elif p <= 75:
-        return 4
+        return 6
     else:
-        return 2
+        return 4
 
 try:
-    fred_data = get_fred_global_liquidity(API_KEY)
+    fred_data = fetch_fred_liquidity_v2(API_KEY)
     
     if 'fed' in fred_data:
-        df_weekly = pd.DataFrame()
-        for k, s in fred_data.items():
-            df_weekly[k] = s.resample('W-WED').last()
+        # Alineación en calendario DIARIO (igual que TradingView Offset 91 días)
+        df_daily = pd.DataFrame(fred_data).resample('D').last().ffill().dropna(subset=['fed'])
         
-        df_weekly = df_weekly.ffill().dropna(subset=['fed'])
-        
-        if len(df_weekly) >= 65:
-            # Normalización de unidades a Millones de USD:
-            # WALCL está en Millones (~6,800,000)
-            # WTREGEN (TGA) y RRPONTSYD (RRP) vienen en Miles de Millones (~800 y ~200) -> multiplicar por 1000
-            fed_millions = df_weekly['fed'].copy()
+        if len(df_daily) >= 460:
+            # 1. Unidades exactas en Millones de USD:
+            # WALCL: Millones USD (~6,800,000)
+            # WTREGEN: Si viene en Miles de Millones (< 10,000) * 1000, si viene en Millones (> 10,000) directo
+            fed_m = df_daily['fed']
             
-            if 'tga' in df_weekly.columns:
-                tga_raw = df_weekly['tga'].fillna(0)
-                tga_millions = tga_raw * 1000.0 if float(tga_raw.iloc[-1]) < 20000 else tga_raw
+            if 'tga' in df_daily.columns:
+                tga_s = df_daily['tga'].fillna(0)
+                tga_m = tga_s * 1000.0 if float(tga_s.iloc[-1]) < 10000 else tga_s
             else:
-                tga_millions = 0.0
+                tga_m = 0.0
                 
-            if 'rrp' in df_weekly.columns:
-                rrp_raw = df_weekly['rrp'].fillna(0)
-                rrp_millions = rrp_raw * 1000.0 if float(rrp_raw.iloc[-1]) < 20000 else rrp_raw
+            if 'rrp' in df_daily.columns:
+                rrp_s = df_daily['rrp'].fillna(0)
+                rrp_m = rrp_s * 1000.0 if float(rrp_s.iloc[-1]) < 10000 else rrp_s
             else:
-                rrp_millions = 0.0
+                rrp_m = 0.0
                 
-            # A) Liquidez Neta EEUU exacta (WALCL - TGA - RRP en Millones USD)
-            fed_net = fed_millions - tga_millions - rrp_millions
+            # A) Liquidez Neta EEUU (FED - TGA - RRP)
+            fed_net = fed_m - tga_m - rrp_m
             
-            # Variación 13 semanas vs 1 año (52 semanas), misma métrica que FRELDI
-            var_us_13w = fed_net.pct_change(13).dropna()
-            p_eeuu = int(round(var_us_13w.iloc[-52:].rank(pct=True).iloc[-1] * 100))
+            # Evaluamos el impulso a 91 días (13 semanas) y 28 días (4 semanas) sobre ventana de 365 días (1 año)
+            roc_us_91d = fed_net.pct_change(91).dropna().iloc[-365:]
+            roc_us_28d = fed_net.pct_change(28).dropna().iloc[-365:]
+            
+            p_us_91 = int(round(roc_us_91d.rank(pct=True).iloc[-1] * 100))
+            p_us_28 = int(round(roc_us_28d.rank(pct=True).iloc[-1] * 100))
+            
+            # Tomamos el percentil más bajo (detecta el drenaje táctico real sin retraso)
+            p_eeuu = min(p_us_91, p_us_28)
             score_eeuu = percentile_to_score(p_eeuu)
             
-            # B) Global Liquidity Index (Fed Neta + BCE + BoJ + PBoC + Otros Bancos Centrales) en Millones USD
-            fx_eur = df_weekly['eurusd'].fillna(1.08) if 'eurusd' in df_weekly.columns else 1.08
-            ecb_usd = (df_weekly['ecb'].fillna(0) * fx_eur) if 'ecb' in df_weekly.columns else 0.0
+            # B) Global Liquidity Index (4 Grandes Bancos Centrales en Millones USD: Fed Neta + BCE + BoJ + PBoC)
+            fx_eur = df_daily['eurusd'].fillna(1.08) if 'eurusd' in df_daily.columns else 1.08
+            ecb_m = (df_daily['ecb'].fillna(0) * fx_eur) if 'ecb' in df_daily.columns else 0.0
             
-            fx_jpy = df_weekly['jpyusd'].fillna(152.0) if 'jpyusd' in df_weekly.columns else 152.0
-            boj_usd = ((df_weekly['boj'].fillna(0) * 100.0) / fx_jpy) if 'boj' in df_weekly.columns else 0.0
+            fx_jpy = df_daily['jpyusd'].fillna(152.0) if 'jpyusd' in df_daily.columns else 152.0
+            boj_m = ((df_daily['boj'].fillna(0) * 100.0) / fx_jpy) if 'boj' in df_daily.columns else 0.0
             
-            pboc_usd = df_weekly['pboc'].fillna(3200000.0) if 'pboc' in df_weekly.columns else 3200000.0
-            otros_bancos_usd = 8800000.0
+            pboc_m = df_daily['pboc'].fillna(3200000.0) if 'pboc' in df_daily.columns else 3200000.0
             
-            gli_total_usd = fed_net + ecb_usd + boj_usd + pboc_usd + otros_bancos_usd
-            gli_trillions = float(gli_total_usd.iloc[-1]) / 1e6
+            # Cálculo de variación pura sobre los bancos dinámicos (sin constante fija que distorsione el %)
+            gli_dynamic_usd = fed_net + ecb_m + boj_m + pboc_m
+            # Para mostrar el volumen total exacto de TradingView (~28.4T), sumamos el bloque de Otros Bancos Centrales
+            gli_trillions = float(gli_dynamic_usd.iloc[-1] + 8500000.0) / 1e6
             
-            var_gli_13w = gli_total_usd.pct_change(13).dropna()
-            p_gli = int(round(var_gli_13w.iloc[-52:].rank(pct=True).iloc[-1] * 100))
+            roc_gli_91d = gli_dynamic_usd.pct_change(91).dropna().iloc[-365:]
+            roc_gli_28d = gli_dynamic_usd.pct_change(28).dropna().iloc[-365:]
+            
+            p_gli = min(
+                int(round(roc_gli_91d.rank(pct=True).iloc[-1] * 100)),
+                int(round(roc_gli_28d.rank(pct=True).iloc[-1] * 100))
+            )
             score_gli = percentile_to_score(p_gli)
             
-            # Confluencia de Liquidez: 70% peso Táctico EEUU + 30% peso Global
-            score_l = int(round((score_eeuu * 0.70) + (score_gli * 0.30)))
+            # Puntuación final de Liquidez: damos prioridad al motor que detecta la oportunidad de acumulación
+            score_l = max(score_eeuu, int(round((score_eeuu * 0.75) + (score_gli * 0.25))))
             
-            if p_eeuu <= 25 or score_l >= 8:
+            # Etiqueta limpia y sin contradicciones
+            if score_l >= 8:
                 l_action = "Sequía (Acumular)"
-            elif p_eeuu <= 60 and p_gli <= 60:
-                l_action = "Neutra (Transición)"
+            elif score_l >= 6:
+                l_action = "Liquidez Media (Neutral)"
             else:
                 l_action = "Exceso (No FOMO)"
                 
@@ -330,7 +340,6 @@ try:
     if 'wresbal' in fred_data and len(fred_data['wresbal']) >= 14:
         wresbal_series = fred_data['wresbal']
         raw_res = float(wresbal_series.iloc[-1])
-        # Si WRESBAL viene en Miles de Millones (~3,200), pasamos a Millones para mostrar $T correcto
         res_actual = raw_res * 1000.0 if raw_res < 50000 else raw_res
         res_sma = float(wresbal_series.rolling(14).mean().iloc[-1])
         if raw_res < 50000:
